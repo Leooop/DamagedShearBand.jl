@@ -1,0 +1,13 @@
+name = "DamagedShearBand"
+uuid = "45aa19b2-dc3c-4cb9-a9f3-5fc87f1f803e"
+authors = ["Léo Petit <leo.petit@live.fr> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
