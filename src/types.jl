@@ -1,3 +1,4 @@
+export Rheology
 
 @kwdef struct Rheology
   G::Float64 = 30e9
