@@ -1,5 +1,6 @@
 module DamagedShearBand
 
-# Write your package code here.
+include("damaged_rheology.jl")
+include("integrators.jl")
 
 end
