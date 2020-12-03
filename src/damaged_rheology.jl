@@ -83,7 +83,7 @@ function compute_KI(d::Rheology,σij,D)
   A, B = compute_AB(d,c1,c2,c3)
   p = 1/3 * tr(σij) # trial pressure, negative in compression
   sij = dev(σij) # trial deviatoric stress
-  τ = get_τ(sij,d)
+  τ = get_τ(sij)
   return (A*p + B*τ) * sqrt(π*d.a)
 end
 
