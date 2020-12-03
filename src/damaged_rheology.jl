@@ -31,8 +31,8 @@ end
 compute_A(r::Rheology,c1,c2,c3) = r.μ*c1 + (1.0 + r.μ*c2)*c3
 compute_B(c1,c2,c3) = c1 + c2*c3
 
-function compute_AB(d::Rheology,c1,c2,c3)
-  A = compute_A(d,c1,c2,c3)
+function compute_AB(r::Rheology,c1,c2,c3)
+  A = compute_A(r,c1,c2,c3)
   B = compute_B(c1,c2,c3)
   return A, B
 end
@@ -40,6 +40,14 @@ end
 # eq 11 in Harsha's notes :
 compute_A1(r::Rheology,A) = A * sqrt((π*r.D₀*(1 - r.ν))/cosd(r.ψ)^3)
 compute_B1(r::Rheology,B) = B * sqrt((π*r.D₀*(1 - r.ν))/cosd(r.ψ)^3)
+
+function compute_A1B1(r::Rheology,A,B)
+  A1 = compute_A1(r,A)
+  B1 = compute_B1(r,B)
+  return A1, B1
+end
+
+compute_A1B1(r::Rheology,D) = compute_A1B1(r,compute_AB(r,compute_c1c2c3(r,D)...)...)
 
 function compute_a1(B1,Γ)
   return (1/Γ)*(1 + B1^2/2)
@@ -53,8 +61,7 @@ function compute_b2(r::Rheology,A1,Γ)
   return (1/Γ)*(A1^2/2 + (3*(1-2r.ν))/(2*(1+r.ν)))
 end
 
-
-
+get_τ(s) = sqrt(0.5 * s ⊡ s)
 
 function compute_KI(r::Rheology,σ,τ,A,B)
   return (A*σ + B*τ) * sqrt(π*r.a)
@@ -185,7 +192,7 @@ function compute_dDdl(r::Rheology,D)
 end
 
 function compute_subcrit_damage_rate(r::Rheology, KI, D)
-  ((KI <= 0) | (D >= 1)) && (return 0.0)
+  ((KI <= 0) || (D >= 1)) && (return 0.0)
   ρ = 2700 ##### TODO better
   Vs = sqrt(r.G/ρ)
   Vr = Vs * (0.862 + 1.14r.ν)/(1 + r.ν)
@@ -219,27 +226,38 @@ function compute_σij(r,A1,B1,Γ,ϵij)
 end
 
 #TODO : 
-# function compute_ϵij(r,A1,B1,Γ,ϵij)
-#   # TODO make a visco elastic version of this function
+function compute_ϵ_oop(r,A1,B1,σᵢⱼ)
 
-#   if all(x->x==0,ϵij)
-#       return Tensor{2,3}(ϵij)
-#   end
+  σoop = σᵢⱼ[3,3]
+  σ = 1/3*tr(σᵢⱼ)
+  sᵢⱼ = dev(σᵢⱼ)
+  τ = get_τ(sᵢⱼ)
+  G = r.G
+  ν = r.ν
+  
+  # stress tensor calculation
+  term1 = ( 1 + A1*B1*σ/(2*τ) + B1^2/2) * σoop
+  term2 = (3ν/(1+ν) + A1*B1*σ/(2*τ) - A1^2/3 + B1^2/2) * σ
+  term3 = A1*B1*τ/3
+  return (1/(2G)) * (term1 - term2 + term3)
+end
+compute_ϵ_oop(r,D,σᵢⱼ)=compute_ϵ_oop(r,compute_A1B1(r,D)...,σᵢⱼ)
 
-#   G = r.elasticity.G
-#   ν = r.elasticity.ν
-#   Id = SymmetricTensor{2,3}(δ)
-#   # strain invariants
-#   ϵ = tr(ϵij)
-#   e = dev(ϵij)
-#   γ = sqrt(2.0 * e ⊡ e)
+function compute_ϵij(r,A1,B1,σᵢⱼ)
 
-#   # stress tensor calculation
-#   term1 = ( (3*(1-2ν))/(1+ν) + A1^2 - A1*B1*ϵ/γ ) * ϵij
-#   term2 = (3ν/(1+ν) + B1^2/2 - A1^2/3 + A1*B1*ϵ/(3γ)) * ϵ
-#   term3 = -A1*B1*γ/2
-#   return (G/Γ) * (term1 + (term2 + term3)*Id)
-# end
+  σ = 1/3*tr(σᵢⱼ)
+  sᵢⱼ = dev(σᵢⱼ)
+  τ = get_τ(sᵢⱼ)
+  G = r.G
+  ν = r.ν
+  Id = SymmetricTensor{2,3}(δ)
+  # strain invariants 
+  term1 = ( 1 + A1*B1*σ/(2*τ) + B1^2/2) * σᵢⱼ
+  term2 = (3ν/(1+ν) + A1*B1*σ/(2*τ) - A1^2/3 + B1^2/2) * σ
+  term3 = A1*B1*τ/3
+  return (1/(2G)) * (term1 + (- term2 + term3)*Id)
+end
+compute_ϵij(r,D,σᵢⱼ)=compute_ϵij(r,compute_A1B1(r,D)...,σᵢⱼ)
 
 function state_system!(du,u,p,t)
   D, ϵ, γ, σ, τ = u

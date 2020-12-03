@@ -1,3 +1,5 @@
+using Base: @kwdef
+
 export Rheology
 
 @kwdef struct Rheology
@@ -17,16 +19,16 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", r::Rheology)
   print(io, "Rheology instance with fields :\n",
-  "\t├── G (shear modulus)                            : $(r.G)\n",
-  "\t├── ν (poisson ratio)                        : $(r.ν)\n",
-  "\t├── μ (flaws friction coefficient)               : $(r.μ)\n",
-  "\t├── β (correction factor)                        : $(r.μ)\n",
-  "\t├── K₁c (fracture toughness)                     : $(r.K₁c)\n",
-  "\t├── a (flaws radius)                             : $(r.a)\n",
-  "\t├── ψ (flaws angle wrt σ₁ in degree)             : $(r.ψ)\n",
+  "\t├── G (shear modulus)                             : $(r.G)\n",
+  "\t├── ν (poisson ratio)                             : $(r.ν)\n",
+  "\t├── μ (flaws friction coefficient)                : $(r.μ)\n",
+  "\t├── β (correction factor)                         : $(r.μ)\n",
+  "\t├── K₁c (fracture toughness)                      : $(r.K₁c)\n",
+  "\t├── a (flaws radius)                              : $(r.a)\n",
+  "\t├── ψ (flaws angle wrt σ₁ in degree)              : $(r.ψ)\n",
   "\t├── D₀ (initial damage, constrains flaws density) : $(r.D₀)\n",
-  "\t├── n (stress corrosion index)                   : $(r.n)\n",
-  "\t├── l̇₀ (ref crack growth rate in m/s)            : $(r.l̇₀)\n",
-  "\t├── H (Activation enthalpy (J/mol))              : $(r.H)\n",
-  "\t└── A (preexponetial factor (m/s))               : $(r.A)\n")
+  "\t├── n (stress corrosion index)                    : $(r.n)\n",
+  "\t├── l̇₀ (ref crack growth rate in m/s)             : $(r.l̇₀)\n",
+  "\t├── H (Activation enthalpy (J/mol))               : $(r.H)\n",
+  "\t└── A (preexponetial factor (m/s))                : $(r.A)\n")
 end
