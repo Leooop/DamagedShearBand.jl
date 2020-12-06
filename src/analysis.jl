@@ -45,15 +45,16 @@ function zero_at_damage_onset(r,S,σ₃,D)
   return abs(τ/σ) - A/B
 end
 
-function get_KI_mininizer_D(r)
-  func_to_minimize = D -> -A_over_B(r,D) #optimize function needs an array of variables
-  Dc = optimize(func_to_minimize, r.D₀, 0.99).minimizer[1]
+function get_KI_mininizer_D(r,S,σ₃)
+  func_to_minimize = D -> KI_from_external_load(r,S,σ₃,D) #optimize function needs an array of variables
+  Dc = optimize(func_to_minimize, r.D₀, 0.99,rel_tol=1e-10).minimizer[1]
   return Dc
 end
 
-function A_over_B(r,D)
-  A, B = compute_AB(r,D)
-  return A/B
+function KI_from_external_load(r,S,σ₃,D)
+  σij = build_principal_stress_tensor(r,S,σ₃,D)
+  KI = compute_KI(r,σij,D)
+  return KI
 end
 
 function build_principal_stress_tensor(r,S,σ₃)

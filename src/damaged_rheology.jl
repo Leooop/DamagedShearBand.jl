@@ -49,8 +49,6 @@ function compute_A1B1(r::Rheology,A,B)
 end
 compute_A1B1(r::Rheology,D) = compute_A1B1(r,compute_AB(r,D)...)
 
-compute_A1B1(r::Rheology,D) = compute_A1B1(r,compute_AB(r,compute_c1c2c3(r,D)...)...)
-
 function compute_a1(B1,Γ)
   return (1/Γ)*(1 + B1^2/2)
 end
@@ -81,8 +79,7 @@ function compute_KI(r::Rheology,σ,τ,D)
 end
 
 function compute_KI(d::Rheology,σij,D)
-  c1, c2, c3 = compute_c1c2c3(d,D)
-  A, B = compute_AB(d,c1,c2,c3)
+  A, B = compute_AB(d,D)
   p = 1/3 * tr(σij) # trial pressure, negative in compression
   sij = dev(σij) # trial deviatoric stress
   τ = get_τ(sij)
@@ -193,17 +190,17 @@ function compute_dDdl(r::Rheology,D)
   return (3*D^(2/3)*r.D₀^(1/3))/(cosd(r.ψ)*r.a)
 end
 
-function compute_subcrit_damage_rate(r::Rheology, KI, D)
-  ((KI <= 0) || (D >= 1)) && (return 0.0)
-  ρ = 2700 ##### TODO better
-  Vs = sqrt(r.G/ρ)
-  Vr = Vs * (0.862 + 1.14r.ν)/(1 + r.ν)
+# function compute_subcrit_damage_rate(r::Rheology, KI, D)
+#   ((KI <= 0) || (D >= 1)) && (return 0.0)
+#   ρ = 2700 ##### TODO better
+#   Vs = sqrt(r.G/ρ)
+#   Vr = Vs * (0.862 + 1.14r.ν)/(1 + r.ν)
 
-  dDdl = compute_dDdl(r,D) # damage derivative wrt crack length
-  dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),Vr)  # cracks growth rate
-  @assert dDdl * dldt >= 0
-  return dDdl * dldt
-end
+#   dDdl = compute_dDdl(r,D) # damage derivative wrt crack length
+#   dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),Vr)  # cracks growth rate
+#   @assert dDdl * dldt >= 0
+#   return dDdl * dldt
+# end
 compute_subcrit_damage_rate(r::Rheology, σij, D) = compute_subcrit_damage_rate(r, compute_KI(r, σij, D), D)
 
 function compute_σij(r,A1,B1,Γ,ϵij)

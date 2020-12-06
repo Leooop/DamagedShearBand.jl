@@ -2,7 +2,7 @@ using DamagedShearBand; const DSB = DamagedShearBand
 using Test
 
 # Data :
-S, σ₃ = 3, -1e6
+S, σ₃ = 5, -1e6
 r = DSB.Rheology()
 D = r.D₀
 σᵢⱼ = SymmetricTensor{2,3}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
@@ -45,19 +45,16 @@ end
 end
 
 @testset "get_KI_minimizer_D" begin
-
-    Dc = DSB.get_KI_mininizer_D(r)
+    r = DSB.Rheology(D₀=0.25)
+    Dc = DSB.get_KI_mininizer_D(r,S,σ₃)
     σᵢⱼ_Dc = DSB.build_principal_stress_tensor(r,S,σ₃,Dc)
     KI_Dc = DSB.compute_KI(r, σᵢⱼ_Dc, Dc)
 
-
     # KI after damage onset
-    σᵢⱼ_up = DSB.build_principal_stress_tensor(r,S,σ₃,Dc+0.01)
-    KI_up = DSB.compute_KI(r, σᵢⱼ_up, Dc+0.01)
+    KI_up = DSB.KI_from_external_load(r, S, σ₃, Dc+0.01)
     @test KI_up > KI_Dc
 
     # KI before damage onset
-    σᵢⱼ_down = DSB.build_principal_stress_tensor(r,Sc,σ₃,Dc-0.01)
-    KI_down = DSB.compute_KI(r, σᵢⱼ_down, Dc-0.01)
+    KI_down = DSB.KI_from_external_load(r, S, σ₃, Dc-0.01)
     @test KI_down > KI_Dc
 end
