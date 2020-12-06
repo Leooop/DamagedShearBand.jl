@@ -36,6 +36,7 @@ function compute_AB(r::Rheology,c1,c2,c3)
   B = compute_B(c1,c2,c3)
   return A, B
 end
+compute_AB(r::Rheology,D) = compute_AB(r,compute_c1c2c3(r,D)...)
 
 # eq 11 in Harsha's notes :
 compute_A1(r::Rheology,A) = A * sqrt((π*r.D₀*(1 - r.ν))/cosd(r.ψ)^3)
@@ -46,6 +47,7 @@ function compute_A1B1(r::Rheology,A,B)
   B1 = compute_B1(r,B)
   return A1, B1
 end
+compute_A1B1(r::Rheology,D) = compute_A1B1(r,compute_AB(r,D)...)
 
 compute_A1B1(r::Rheology,D) = compute_A1B1(r,compute_AB(r,compute_c1c2c3(r,D)...)...)
 
@@ -202,6 +204,7 @@ function compute_subcrit_damage_rate(r::Rheology, KI, D)
   @assert dDdl * dldt >= 0
   return dDdl * dldt
 end
+compute_subcrit_damage_rate(r::Rheology, σij, D) = compute_subcrit_damage_rate(r, compute_KI(r, σij, D), D)
 
 function compute_σij(r,A1,B1,Γ,ϵij)
   # TODO make a visco elastic version of this function
@@ -330,4 +333,80 @@ function state_system!(du,u,p,t)
 
   # assertions
   @assert dD >= 0
+end
+
+function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
+
+  # unpack
+  G = r.elasticity.G
+  ν = r.elasticity.ν
+
+  # Damage constants
+  c1, c2, c3 = compute_c1c2c3(r,D)
+  A, B = compute_AB(r,c1,c2,c3)
+  A₁ = compute_A1(r,A)
+  B₁ = compute_B1(r,B)
+  Γ = compute_Γ(r,A₁,B₁)
+
+  # strain invariants
+  ϵ = tr(ϵij)
+  e = dev(ϵij)
+  γ = sqrt(2.0 * e ⊡ e)
+
+  @assert !isnan(G)
+  @assert !isnan(c1)
+  @assert !isnan(c2)
+  @assert !isnan(c3)
+  @assert !isnan(A)
+  @assert !isnan(B)
+  @assert !isnan(A₁)
+  @assert !isnan(B₁)
+  @assert !isnan(Γ)
+  @assert !isnan(ϵ)
+  @assert !isnan(γ)
+  @assert !isnan((3*(1-2ν))/(2*(1+ν)))
+  @assert !isnan(A₁^2/2)
+  # println("A₁*B₁*ϵ : ", A₁*B₁*ϵ)
+  # println("(2*γ) : ", (2*γ))
+  #@assert !isnan(A₁*B₁*ϵ/(2*γ)) # returns NaN, because 0/0
+
+  (γ == 0) && (γ += 1e-15)#zero(typeof(ϵij))) # TODO remove redundancy
+  ϵ̂ = ϵij/γ
+
+  # get stiffness factors
+  if G/Γ == 0
+      Cμ = 0.0
+      Cλ = 0.0
+      Cσ = 0.0
+      Cσσ = 0.0
+  else
+      Cμ = G/Γ * ( (3*(1-2ν))/(2*(1+ν)) + A₁^2/2 - A₁*B₁*ϵ/(2*γ) )
+      Cλ = G/Γ * ( 3*ν/(1+ν) + B₁^2/2 - A₁^2/3 + A₁*B₁*ϵ/γ + 2A₁*B₁*ϵ^3/(9γ^3) )
+      Cσ = - G/Γ * ( A₁*B₁ + 2*A₁*B₁*ϵ^2/(3*γ^2) )
+      Cσσ = G/Γ * (2A₁*B₁*ϵ/γ)
+  end
+
+
+
+  if isnan(Cμ)
+      println("Cμ = ", Cμ)
+      @assert !isnan(G/Γ)
+      println("G/Γ = ", G/Γ)
+      @assert !isnan( (3*(1-2ν))/(2*(1+ν)) + A₁^2/2 - A₁*B₁*ϵ/(2*γ) )
+      println("second term Cμ = ", (3*(1-2ν))/(2*(1+ν)) + A₁^2/2 - A₁*B₁*ϵ/(2*γ) )
+      @assert !isnan(G/Γ * ( (3*(1-2ν))/(2*(1+ν)) + A₁^2/2 - A₁*B₁*ϵ/(2*γ) ))
+  end
+  if isnan(Cλ)
+      println("Cλ = ", Cλ)
+  end
+  @assert !isnan(Cσ)
+  @assert !isnan(Cσσ)
+  # functional form of the stiffness tensor
+  C_func(i,j,k,l) = Cμ * ( δ(k,i)*δ(l,j) + δ(l,i)*δ(k,j) ) +
+                    Cλ * ( δ(i,j)*δ(k,l) ) +
+                    Cσ * ( ϵ̂[i,j]*δ(k,l) + δ(i,j)*ϵ̂[k,l] ) +
+                    Cσσ * (ϵ̂[i,j]*ϵ̂[k,l])
+
+  # assemble the tensor
+  return SymmetricTensor{4,3}(C_func)
 end
