@@ -81,4 +81,14 @@ end
     @test all([σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec_elast])
     @test all([σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec_elast])
     @test all([σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec_elast])
+
+    
+    # check tangent modulus along xx (σxx/ϵxx)
+    Emod = DSB.E_from_Gν(r.G,r.ν)
+    tan_mod_elast_model = (σᵢⱼ_vec_elast[end][1,1]-σᵢⱼ_vec_elast[1][1,1]) / (ϵᵢⱼ_vec[end][1,1]-ϵᵢⱼ_vec[1][1,1])
+    tan_mod_Dat0_model = (σᵢⱼ_vec[end][1,1]-σᵢⱼ_vec_elast[1][1,1]) / (ϵᵢⱼ_vec[end][1,1]-ϵᵢⱼ_vec[1][1,1])
+    tan_mod_theoretical = Emod/(1-r.ν^2)
+    @test abs(tan_mod_Dat0_model-tan_mod_theoretical) < 1e-2
+    @test abs(tan_mod_elast_model-tan_mod_theoretical) < 1e-2
+
 end

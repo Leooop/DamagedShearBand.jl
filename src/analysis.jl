@@ -232,7 +232,8 @@ function solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e-12, maxiter=
   D = D_i
   # get first guess of the unknowns with an elastic solve
   ϵᵢⱼnext = insert_into(ϵᵢⱼ_i, (ϵᵢⱼ_i[1,1] + ϵ̇11*Δt), (1,1))
-  σᵢⱼnext = compute_σij(r,D,ϵᵢⱼnext)
+  σᵢⱼnext = σᵢⱼ_i#σᵢⱼnext = compute_σij(r,D,ϵᵢⱼnext)
+  #σᵢⱼnext = insert_into(σᵢⱼnext, -1e6, (2,2))
   u = Vec(σᵢⱼnext[1,1], σᵢⱼnext[3,3], ϵᵢⱼnext[2,2])
   #@debug "u_i = $u"
   for i in 1:maxiter

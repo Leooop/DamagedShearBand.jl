@@ -89,10 +89,10 @@ using Plots; plotlyjs()
 ## Second strategy
 using DamagedShearBand ; const DSB = DamagedShearBand
 
-tspan = (0.0,0.1)
-Δt = 0.001
+tspan = (0.0,1000)
+Δt = 0.1
 ϵ̇11 = -1e-4
-r = DSB.Rheology(D₀=0.1) # object containing elastic moduli and damage parameters.
+r = DSB.Rheology(D₀=0.0) # object containing elastic moduli and damage parameters.
 σ₃ = -1e6
 S = 1
 D_i = r.D₀
@@ -100,6 +100,12 @@ D_i = r.D₀
 ϵᵢⱼ_i = DSB.compute_ϵij(r,D_i,σᵢⱼ_i)
 u_i = [σᵢⱼ_i[1,1], σᵢⱼ_i[3,3], ϵᵢⱼ_i[2,2]] # initialization of unknown vector (3,3) component is out of plane
 
+# σ = 1/3 *tr(σᵢⱼ_i)
+# I = SymmetricTensor{2,3}(DSB.δ)
+# sij = σᵢⱼ_i - σ*I
+# -DSB.get_τ(sij)/σ
+
+# DSB.compute_KI(r,σᵢⱼ_i,D_i)
 #σᵢⱼnext, ϵᵢⱼnext, D, u = DSB.solve_2(r, σᵢⱼ_i, ϵᵢⱼ_i, D_i, ϵ̇11, Δt ; abstol=1e-12, maxiter=10)
 
 
@@ -107,25 +113,31 @@ u_i = [σᵢⱼ_i[1,1], σᵢⱼ_i[3,3], ϵᵢⱼ_i[2,2]] # initialization of un
 # ϵᵢⱼnext_test = DSB.insert_into(ϵᵢⱼ_i, (ϵᵢⱼ_i[1,1] + ϵ̇11*Δt), (1,1))
 # σᵢⱼnext_test = DSB.compute_σij(r,D_i,ϵᵢⱼnext_test)
 
-# Ce = DSB.get_elastic_stiffness_tensor(r::Rheology)
-# σᵢⱼnext_e = Ce ⊡ ϵᵢⱼ_vec[end]
-# σᵢⱼ_vec_elast = Ref(Ce) .⊡ ϵᵢⱼ_vec
-
+Ce = DSB.get_elastic_stiffness_tensor(r::Rheology)
+σᵢⱼnext_e = Ce ⊡ ϵᵢⱼ_vec[end]
+σᵢⱼ_vec_elast = Ref(Ce) .⊡ ϵᵢⱼ_vec_a
+pente = (σᵢⱼ_vec_elast[end][1,1]-σᵢⱼ_vec_elast[2][1,1]) / (ϵᵢⱼ_vec_a[end][1,1]-ϵᵢⱼ_vec_a[2][1,1])
+E = DSB.E_from_Gν(r.G,r.ν)
+tan_modulus = E/(1-r.ν^2)
 # ϵ̇ij_ana, Ḋ = DSB.compute_ϵ̇ij(r,D_i,σᵢⱼ_i,σᵢⱼnext,Δt)
 
-#t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
+t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
 
-t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-15, time_maxiter=100, newton_maxiter=10, e₀=(D=1e-10, σ=1e-4, ϵ=1e-10))
+#t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-15, time_maxiter=100, newton_maxiter=10, e₀=(D=1e-10, σ=1e-4, ϵ=1e-10))
+
+##
 plot(t_vec,D_vec)
   ylims!((D_vec[1],D_vec[end]))
 plot(t_vec,[σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec])
 
   #plot!(t_vec,[σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_elast])
 #plot(t_vec,[σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec])
+plot(t_vec_a,D_vec_a)
 plot(diff(t_vec_a))
 plot(t_vec_a,D_vec_a)
 D_vec_a[end]-D_vec_a[1]
 plot(t_vec_a,[σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_a])
 plot(t_vec_a,[ϵᵢⱼ[1,1] for ϵᵢⱼ in ϵᵢⱼ_vec_a])
+plot([-ϵᵢⱼ[1,1] for ϵᵢⱼ in ϵᵢⱼ_vec_a],[-σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_a])
 
 plot!(t_vec_a[2:end],-diff(t_vec_a).*3e8)

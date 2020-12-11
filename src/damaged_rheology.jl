@@ -2,6 +2,7 @@
 Isym_func(i,j,k,l) = 0.5*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k))
 Isymdev_func(i,j,k,l) = 0.5*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k)) - 1.0/3.0*δ(i,j)*δ(k,l)
 
+E_from_Gν(G,ν) = 2G*(1 + ν)
 λ_from_Gν(G,ν) = 2G*ν / (1 - 2ν)
 
 Dᵉ_func(i,j,k,l,G,λ) = λ*(δ(i,j)*δ(k,l)) + G*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k))
@@ -439,7 +440,7 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt)
   # stress derivatives
   σ̇ij = (σijnext-σij)/Δt
   σ̇ = (1/3)*(tr(σ̇ij))
-  τ̇ = sij ⊡ σ̇ij / 2*τ
+  τ̇ = sij ⊡ σ̇ij / (2*τ)
 
   #damage constants and derivatives
   if r.D₀ == 0
@@ -464,6 +465,8 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt)
   t2 = ( dλ₁dσ(A1,B1,τ)*σ̇ + dλ₁dτ(A1,B1,σ,τ)*τ̇ )*sij
   t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σij - ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
   ϵ̇ij = 1/(2r.G) * (t1 + t2 + t3)
+
+  #ϵ̇ij = insert_into(ϵ̇ij, -1e-5, (1,1)) ######## !!!!!!!!
   return ϵ̇ij, Ḋ
 end
 
