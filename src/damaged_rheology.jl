@@ -2,22 +2,41 @@
 Isym_func(i,j,k,l) = 0.5*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k))
 Isymdev_func(i,j,k,l) = 0.5*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k)) - 1.0/3.0*δ(i,j)*δ(k,l)
 
+λ_from_Gν(G,ν) = 2G*ν / (1 - 2ν)
+
+Dᵉ_func(i,j,k,l,G,λ) = λ*(δ(i,j)*δ(k,l)) + G*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k))
+Cᵉ_func(i,j,k,l,G,λ) = (λ/(2G*(3λ + 2G)))*(δ(i,j)*δ(k,l)) + (1/2G)*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k))
+
+get_elastic_stiffness_tensor(G,λ) = SymmetricTensor{4, 3}( (i,j,k,l) -> Dᵉ_func(i,j,k,l,G,λ))
+get_elastic_stiffness_tensor(r::Rheology) = SymmetricTensor{4, 3}( (i,j,k,l) -> Dᵉ_func(i,j,k,l,r.G,λ_from_Gν(r.G,r.ν)))
+get_elastic_compliance_tensor(r::Rheology) = SymmetricTensor{4, 3}( (i,j,k,l) -> Cᵉ_func(i,j,k,l,r.G,λ_from_Gν(r.G,r.ν)))
+
+
 # eq 16 Bhat2012 & 2016 & notes (because in Bhat2011 c2 isn't the same form as in Harsha's notes) :
 #compute_c1(d::Damage,D) = sqrt(1-cos(d.ψ)^2)/(π*cos(d.ψ)^(3/2)*((D/d.D₀)^(1/3) - 1 + d.β/cos(d.ψ))^(3/2))
 function compute_c1(r,D)
   α = cosd(r.ψ)
   @assert α > 0
-  @assert (D/r.D₀) >= 1
-  sqrt(1-α^2)/(π*α^(3/2)*((D/r.D₀)^(1/3) - 1 + r.β/α)^(3/2))
+
+  if r.D₀>0
+    @assert (D/r.D₀) >= 1
+    return sqrt(1-α^2)/(π*α^(3/2)*((D/r.D₀)^(1/3) - 1 + r.β/α)^(3/2))
+  elseif (r.D₀==0) & (D==0)
+    return sqrt(1-α^2)/(π*α^(3/2)*(r.β/α)^(3/2)) # lim D->0 D/D0 = 1
+  end
 end
 # Perol&Bhat2016 : 1/α  or  Harsha's notes : 1/α^2 ???
-compute_c2(d::Rheology,D) = (sqrt(1 - cosd(d.ψ)^2)/cosd(d.ψ)^2) * (d.D₀^(2/3)/(1 - D^(2/3)))
+function compute_c2(d::Rheology,D) 
+  (d.D₀==0) && (return 0.0)
+  return (sqrt(1 - cosd(d.ψ)^2)/cosd(d.ψ)^2) * (d.D₀^(2/3)/(1 - D^(2/3)))
+end
 
 function compute_c3(d::Rheology,D)
   α = cosd(d.ψ)
   @assert α > 0
+  (d.D₀ == D) && (return 0.0)
   @assert (D/d.D₀) >= 1
-  (2sqrt(α)/π)*((D/d.D₀)^(1/3) - 1)^(1/2)
+  return (2sqrt(α)/π)*((D/d.D₀)^(1/3) - 1)^(1/2)
 end
 
 function compute_c1c2c3(r,D)
@@ -190,18 +209,19 @@ function compute_dDdl(r::Rheology,D)
   return (3*D^(2/3)*r.D₀^(1/3))/(cosd(r.ψ)*r.a)
 end
 
-# function compute_subcrit_damage_rate(r::Rheology, KI, D)
-#   ((KI <= 0) || (D >= 1)) && (return 0.0)
-#   ρ = 2700 ##### TODO better
-#   Vs = sqrt(r.G/ρ)
-#   Vr = Vs * (0.862 + 1.14r.ν)/(1 + r.ν)
+function compute_subcrit_damage_rate(r::Rheology, KI, D)
+  ((KI <= 0) || (D >= 1)) && (return 0.0)
+  ρ = 2700 ##### TODO better
+  Vs = sqrt(r.G/ρ)
+  Vr = Vs * (0.862 + 1.14r.ν)/(1 + r.ν)
 
-#   dDdl = compute_dDdl(r,D) # damage derivative wrt crack length
-#   dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),Vr)  # cracks growth rate
-#   @assert dDdl * dldt >= 0
-#   return dDdl * dldt
-# end
-compute_subcrit_damage_rate(r::Rheology, σij, D) = compute_subcrit_damage_rate(r, compute_KI(r, σij, D), D)
+  dDdl = compute_dDdl(r,D) # damage derivative wrt crack length
+  dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),Vr)  # cracks growth rate
+  @debug dDdl * dldt
+  @assert dDdl * dldt >= 0
+  return dDdl * dldt
+end
+
 
 function compute_σij(r,A1,B1,Γ,ϵij)
   # TODO make a visco elastic version of this function
@@ -224,6 +244,7 @@ function compute_σij(r,A1,B1,Γ,ϵij)
   term3 = -A1*B1*γ/2
   return (G/Γ) * (term1 + (term2 + term3)*Id)
 end
+compute_σij(r::Rheology,D,ϵij) = D==0 ? compute_σij(r,0.0,0.0,compute_Γ(r,0.0,0.0),ϵij) : compute_σij(r,compute_A1B1(r,D)...,compute_Γ(r,D),ϵij)
 
 #TODO : 
 function compute_ϵ_oop(r,A1,B1,σᵢⱼ)
@@ -257,7 +278,7 @@ function compute_ϵij(r,A1,B1,σᵢⱼ)
   term3 = A1*B1*τ/3
   return (1/(2G)) * (term1 + (- term2 + term3)*Id)
 end
-compute_ϵij(r,D,σᵢⱼ)=compute_ϵij(r,compute_A1B1(r,D)...,σᵢⱼ)
+compute_ϵij(r,D,σᵢⱼ) = D==0 ? compute_ϵij(r,0.0,0.0,σᵢⱼ) : compute_ϵij(r,compute_A1B1(r,D)...,σᵢⱼ)
 
 function state_system!(du,u,p,t)
   D, ϵ, γ, σ, τ = u
@@ -335,14 +356,11 @@ end
 function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
 
   # unpack
-  G = r.elasticity.G
-  ν = r.elasticity.ν
+  G = r.G
+  ν = r.ν
 
   # Damage constants
-  c1, c2, c3 = compute_c1c2c3(r,D)
-  A, B = compute_AB(r,c1,c2,c3)
-  A₁ = compute_A1(r,A)
-  B₁ = compute_B1(r,B)
+  A₁,B₁ = compute_A1B1(r,D)
   Γ = compute_Γ(r,A₁,B₁)
 
   # strain invariants
@@ -351,11 +369,11 @@ function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
   γ = sqrt(2.0 * e ⊡ e)
 
   @assert !isnan(G)
-  @assert !isnan(c1)
-  @assert !isnan(c2)
-  @assert !isnan(c3)
-  @assert !isnan(A)
-  @assert !isnan(B)
+  #@assert !isnan(c1)
+  #@assert !isnan(c2)
+  #@assert !isnan(c3)
+  #@assert !isnan(A)
+  #@assert !isnan(B)
   @assert !isnan(A₁)
   @assert !isnan(B₁)
   @assert !isnan(Γ)
@@ -407,3 +425,52 @@ function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
   # assemble the tensor
   return SymmetricTensor{4,3}(C_func)
 end
+
+## 
+
+function compute_ϵ̇ij(r,D,σij,σijnext,Δt)
+  𝕀 = SymmetricTensor{2,3}(δ) # Second order identity tensor
+
+  # stress at previous timestep
+  σ = (1/3)*(tr(σij))
+  sij = σij - σ*𝕀
+  τ = get_τ(sij)
+
+  # stress derivatives
+  σ̇ij = (σijnext-σij)/Δt
+  σ̇ = (1/3)*(tr(σ̇ij))
+  τ̇ = sij ⊡ σ̇ij / 2*τ
+
+  #damage constants and derivatives
+  if r.D₀ == 0
+    A1, B1 = 0.0, 0.0
+    dA1dD, dB1dD = 0.0, 0.0
+  else
+    c1, c2, c3 = compute_c1c2c3(r,D)
+    A, B = compute_AB(r,c1,c2,c3)
+    A1, B1 = compute_A1B1(r,A,B)
+    dc1dD = compute_dc1dD(r,D)
+    dc2dD = compute_dc2dD(r,D)
+    dc3dD = compute_dc2dD(r,D)
+    dA1dD = compute_dA1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
+    dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
+  end
+
+  KI = compute_KI(r,(σijnext+σij)/2,D) # compute KI at intermediate stress : TO TEST.
+  #KI = compute_KI(r,σij,D)
+  Ḋ = compute_subcrit_damage_rate(r,KI,D)
+  
+  t1 = λ₁(A1,B1,σ,τ)*σ̇ij - ( λ₂(r,A1,B1,σ,τ)*σ̇ - (1/3)*A1*B1*τ̇ )*𝕀
+  t2 = ( dλ₁dσ(A1,B1,τ)*σ̇ + dλ₁dτ(A1,B1,σ,τ)*τ̇ )*sij
+  t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σij - ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
+  ϵ̇ij = 1/(2r.G) * (t1 + t2 + t3)
+  return ϵ̇ij, Ḋ
+end
+
+λ₁(A1,B1,σ,τ) =  1 + A1*B1*σ/(2*τ) + B1^2/2
+λ₂(r,A1,B1,σ,τ) = 3*r.ν/(1+r.ν) + A1*B1*σ/(2*τ) - A1^2/3 + B1^2/2
+dλ₁dσ(A1,B1,τ) = A1*B1/(2*τ)
+dλ₁dτ(A1,B1,σ,τ) = -A1*B1*σ/(2*τ^2)
+dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ) = (dA1dD*B1 + A1*dB1dD)*σ/(2*τ) + B1*dB1dD
+dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ) = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ) - (2/3)*A1*dA1dD
+

@@ -58,3 +58,27 @@ end
     KI_down = DSB.KI_from_external_load(r, S, σ₃, Dc-0.01)
     @test KI_down > KI_Dc
 end
+
+@testset "solving using given ϵ̇11. D=D₀=0 test vs elastic rheology" begin
+    tspan = (0.0,1.0)
+    Δt = 0.1
+    ϵ̇11 = -1e-5
+    r = DSB.Rheology(D₀=0.0) # object containing elastic moduli and damage parameters.
+    D_i = r.D₀
+    σ₃ = -1e6
+    S = 1
+    
+    σᵢⱼ_i = DSB.build_principal_stress_tensor(r,S,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint
+    ϵᵢⱼ_i = DSB.compute_ϵij(r,D_i,σᵢⱼ_i)
+    t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
+
+    Ce = DSB.get_elastic_stiffness_tensor(r::Rheology)
+    σᵢⱼ_vec_elast = Ref(Ce) .⊡ ϵᵢⱼ_vec
+
+    @test all([σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_elast])
+    @test all([σᵢⱼ[2,2] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[2,2] for σᵢⱼ in σᵢⱼ_vec_elast])
+    @test all([σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec_elast])
+    @test all([σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec_elast])
+    @test all([σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec_elast])
+    @test all([σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec_elast])
+end
