@@ -1,6 +1,6 @@
 @time (using DamagedShearBand ; const DSB = DamagedShearBand)
 ENV["JULIA_DEBUG"] = DamagedShearBand
-using Plots; plotlyjs()
+
 
 # σ₃ = -1e6
 # θ = 60.0
@@ -85,20 +85,26 @@ using Plots; plotlyjs()
 # KI_vec = [DSB.KI_to_minimize(r,S,σ₃,D) for D in r.D₀:0.01:0.99]
 # plot(r.D₀:0.01:0.99,KI_vec)
 # Dc = DSB.get_KI_mininizer_D(r,S,σ₃)
-
+σ₂₂
 ## Second strategy
 using DamagedShearBand ; const DSB = DamagedShearBand
+using Plots
+plotlyjs()
 
-tspan = (0.0,1000)
-Δt = 0.1
+tspan = (0.0,24)
+Δt = 10
 ϵ̇11 = -1e-4
-r = DSB.Rheology(D₀=0.0) # object containing elastic moduli and damage parameters.
+r = DSB.Rheology(D₀=0.25) # object containing elastic moduli and damage parameters.
 σ₃ = -1e6
 S = 1
 D_i = r.D₀
 σᵢⱼ_i = DSB.build_principal_stress_tensor(r,S,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint
 ϵᵢⱼ_i = DSB.compute_ϵij(r,D_i,σᵢⱼ_i)
-u_i = [σᵢⱼ_i[1,1], σᵢⱼ_i[3,3], ϵᵢⱼ_i[2,2]] # initialization of unknown vector (3,3) component is out of plane
+#σᵢⱼ_i2,ϵᵢⱼ_i2,D_i2 = σᵢⱼ_vec_a[end], ϵᵢⱼ_vec_a[end], D_vec_a[end]
+#σᵢⱼ_i,ϵᵢⱼ_i,D_i = σᵢⱼ_i2,ϵᵢⱼ_i2,D_i2
+
+#t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
+t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, time_maxiter=nothing, newton_maxiter=100, e₀=(D=1e-4, σ=1.0, ϵ=1e-6))
 
 # σ = 1/3 *tr(σᵢⱼ_i)
 # I = SymmetricTensor{2,3}(DSB.δ)
@@ -112,18 +118,18 @@ u_i = [σᵢⱼ_i[1,1], σᵢⱼ_i[3,3], ϵᵢⱼ_i[2,2]] # initialization of un
 
 # ϵᵢⱼnext_test = DSB.insert_into(ϵᵢⱼ_i, (ϵᵢⱼ_i[1,1] + ϵ̇11*Δt), (1,1))
 # σᵢⱼnext_test = DSB.compute_σij(r,D_i,ϵᵢⱼnext_test)
-
+##
 Ce = DSB.get_elastic_stiffness_tensor(r::Rheology)
 σᵢⱼnext_e = Ce ⊡ ϵᵢⱼ_vec[end]
 σᵢⱼ_vec_elast = Ref(Ce) .⊡ ϵᵢⱼ_vec_a
-pente = (σᵢⱼ_vec_elast[end][1,1]-σᵢⱼ_vec_elast[2][1,1]) / (ϵᵢⱼ_vec_a[end][1,1]-ϵᵢⱼ_vec_a[2][1,1])
+pente_model = (σᵢⱼ_vec_a[end][1,1]-σᵢⱼ_vec_a[2][1,1]) / (ϵᵢⱼ_vec_a[end][1,1]-ϵᵢⱼ_vec_a[2][1,1])
+pente_elast = (σᵢⱼ_vec_elast[end][1,1]-σᵢⱼ_vec_elast[2][1,1]) / (ϵᵢⱼ_vec_a[end][1,1]-ϵᵢⱼ_vec_a[2][1,1])
 E = DSB.E_from_Gν(r.G,r.ν)
 tan_modulus = E/(1-r.ν^2)
 # ϵ̇ij_ana, Ḋ = DSB.compute_ϵ̇ij(r,D_i,σᵢⱼ_i,σᵢⱼnext,Δt)
 
-t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
 
-#t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-15, time_maxiter=100, newton_maxiter=10, e₀=(D=1e-10, σ=1e-4, ϵ=1e-10))
+
 
 ##
 plot(t_vec,D_vec)

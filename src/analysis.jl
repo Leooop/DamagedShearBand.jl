@@ -163,7 +163,7 @@ function adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspa
     println("------")
     println("time iteration $(length(t_vec)) : $tsim")
     println("------")
-    σᵢⱼnext, ϵᵢⱼnext, Dnext, Δt_used, Δt_next = adaptative_Δt_solve(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol, maxiter=newton_maxiter, e₀)
+    σᵢⱼnext, ϵᵢⱼnext, Dnext, Δt_used, Δt_next = adaptative_Δt_solve(r,σᵢⱼ_vec[end],ϵᵢⱼ_vec[end],D_vec[end],ϵ̇11,Δt ; abstol, maxiter=newton_maxiter, e₀)
     push!(σᵢⱼ_vec,σᵢⱼnext)
     push!(ϵᵢⱼ_vec,ϵᵢⱼnext)
     push!(D_vec,Dnext)

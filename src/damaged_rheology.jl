@@ -218,7 +218,7 @@ function compute_subcrit_damage_rate(r::Rheology, KI, D)
 
   dDdl = compute_dDdl(r,D) # damage derivative wrt crack length
   dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),Vr)  # cracks growth rate
-  @debug dDdl * dldt
+  #@debug dDdl * dldt
   @assert dDdl * dldt >= 0
   return dDdl * dldt
 end
