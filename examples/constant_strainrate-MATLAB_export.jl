@@ -32,13 +32,6 @@ t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.adaptative_time_integration(r,σ�
                                                                  newton_maxiter=100, 
                                                                  e₀=(D=1e-4, σ=1.0, ϵ=1e-5),
                                                                  print_frequency=10000)
-# extract scalar time series :
-σ₁₁_vec = [σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec]
-σ₂₂_vec = [σᵢⱼ[2,2] for σᵢⱼ in σᵢⱼ_vec]
-σ₃₃_vec = [σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec]
-ϵ₁₁_vec = [ϵᵢⱼ[1,1] for ϵᵢⱼ in ϵᵢⱼ_vec]
-ϵ₂₂_vec = [ϵᵢⱼ[2,2] for ϵᵢⱼ in ϵᵢⱼ_vec]
-ϵ₃₃_vec = [ϵᵢⱼ[3,3] for ϵᵢⱼ in ϵᵢⱼ_vec]
 
 # make a dictionary out of time series :
 vars_dict = Dict("sigma1"=>[σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec],
