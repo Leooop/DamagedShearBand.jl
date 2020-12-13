@@ -153,16 +153,19 @@ end
 ## Second strategy ##
 #####################
 
-function adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, time_maxiter=nothing, newton_maxiter=100, e₀=1e-12)
+function adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, time_maxiter=nothing, newton_maxiter=100, e₀=1e-12, print_frequency=1)
   t_vec = Float64[tspan[1]]
   tsim = tspan[1]
   σᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
   ϵᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
   D_vec = Float64[D_i]
+  i = 1 # iter counter
   while tsim < tspan[2]
-    println("------")
-    println("time iteration $(length(t_vec)) : $tsim")
-    println("------")
+    if i%print_frequency == 0
+      println("------")
+      println("time iteration $(length(t_vec)) : $tsim")
+      println("------")
+    end
     σᵢⱼnext, ϵᵢⱼnext, Dnext, Δt_used, Δt_next = adaptative_Δt_solve(r,σᵢⱼ_vec[end],ϵᵢⱼ_vec[end],D_vec[end],ϵ̇11,Δt ; abstol, maxiter=newton_maxiter, e₀)
     push!(σᵢⱼ_vec,σᵢⱼnext)
     push!(ϵᵢⱼ_vec,ϵᵢⱼnext)
@@ -170,6 +173,7 @@ function adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspa
     tsim = t_vec[end] + Δt_used
     push!(t_vec,tsim)
     Δt = Δt_next
+    i += 1
     if !isnothing(time_maxiter)
       (length(t_vec)==time_maxiter+1) && break
     end
@@ -210,7 +214,7 @@ function adaptative_Δt_solve(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e
 
 end
 
-function time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
+function time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100,print_frequency=1)
   t_vec = tspan[1]:Δt:tspan[2]
   σᵢⱼ_vec = Vector{SymmetricTensor{2,3}}(undef,length(t_vec))
   ϵᵢⱼ_vec = similar(σᵢⱼ_vec)
@@ -219,9 +223,11 @@ function time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=
   ϵᵢⱼ_vec[1] = ϵᵢⱼ_i
   D_vec[1] = D_i
   for i in 2:length(t_vec)
-    println("------")
-    println("time iteration $(i-1)")
-    println("------")
+    if i%print_frequency == 0
+      println("------")
+      println("time iteration $(i-1)")
+      println("------")
+    end
     σᵢⱼ_vec[i], ϵᵢⱼ_vec[i], D_vec[i], u = solve_2(r,σᵢⱼ_vec[i-1],ϵᵢⱼ_vec[i-1],D_vec[i-1],ϵ̇11,Δt ; abstol, maxiter)
   end
   return t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec
@@ -250,7 +256,7 @@ function solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e-12, maxiter=
 
     (norm(res) <= abstol) && break
     
-    (i == maxiter) && println("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+    (i == maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
   end
   # update ϵᵢⱼnext and σᵢⱼnext with converged u
   ϵᵢⱼnext = insert_into(ϵᵢⱼnext, u[3], (2,2)) 

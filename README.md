@@ -29,6 +29,8 @@ Requires Julia v1.3 or higher
 
 #### Examples
 
+See the examples folder for how to plot simulation output or how to export it to MATLAB .mat format.
+
 ##### Single point deformation description with imposed constant strain rate along x direction (ϵ̇₁₁) and constant stress along y direction (σ₂₂).
 
 ```julia
