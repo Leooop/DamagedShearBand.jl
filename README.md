@@ -37,30 +37,43 @@ See the examples folder for how to plot simulation output or how to export it to
 using DamagedShearBand ; const DSB = DamagedShearBand
 
 # imposed values
-ϵ̇₁₁ = -1e-4
-σ₂₂ = -1e-6 # negative in compression
+ϵ̇₁₁ = -1e-6
+σ₂₂ = -1e6 # negative in compression
 
 # initial higher compressive stress multiplier (S = σ₁₁/σ₂₂)
 S = 1.0
 
 # Create a Rheology type instance containing elastic moduli and damage parameters. Change default values by  supplying keywords arguments.
-r = DSB.Rheology(D₀=0.3) 
+r = DSB.Rheology(D₀=0.4,n=34.0) 
 
 # initial damage
 D_i = r.D₀
 
 # time integration parameters :
-tspan = (0.0,20) # initial and final simulation time
-Δt_i = 0.1 # initial timestep
+ϵ₁₁_goal = -0.002
+tspan = (0.0,ϵ₁₁_goal/ϵ̇₁₁) # initial and final simulation time
+Δt_i = 0.0001 # initial timestep
 
 # Build stress and strain tensors 
 σᵢⱼ_i = DSB.build_principal_stress_tensor(r,S,σ₂₂,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
 ϵᵢⱼ_i = DSB.compute_ϵij(r,D_i,σᵢⱼ_i)
 
+n_iter_saved = 5000
+n_iter_printed = 10
+op = DSB.OutputParams(save_frequency = n_iter_saved/(tspan[2]-tspan[1]), #save approx `n_iter_saved` per simulation
+                      save_period = nothing,
+                      print_frequency = n_iter_printed/(tspan[2]-tspan[1]),
+                      print_period = nothing)
 
+sp = DSB.SolverParams(newton_abstol = 1e-12,
+                      newton_maxiter = 100,
+                      time_maxiter = nothing,
+                      e₀ = (D=1e-1, σ=100.0, ϵ=1e-3)) 
+
+p = DSB.Params(op,sp)
 # Integrate over time, by solving for the unknowns [σ₁₁next, σ₃₃next, ϵ₂₂next] at each timestep
 # -- e₀ is the absolute tolerance used to adapt time stepping, may be a scalar or a NamedTuple with keys (D,σ,ϵ)
 # -- abstol is the absolute tolerance on the unknowns in the Newton solver 
-t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇₁₁,Δt_i,tspan ; abstol=1e-12, time_maxiter=nothing, newton_maxiter=100, e₀=(D=1e-4, σ=1.0, ϵ=1e-6))
+t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.adaptative_time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇₁₁,Δt_i,tspan)
 
 ```
