@@ -12,7 +12,7 @@ get_elastic_stiffness_tensor(G,λ) = SymmetricTensor{4, 3}( (i,j,k,l) -> Dᵉ_fu
 get_elastic_stiffness_tensor(r::Rheology) = SymmetricTensor{4, 3}( (i,j,k,l) -> Dᵉ_func(i,j,k,l,r.G,λ_from_Gν(r.G,r.ν)))
 get_elastic_compliance_tensor(r::Rheology) = SymmetricTensor{4, 3}( (i,j,k,l) -> Cᵉ_func(i,j,k,l,r.G,λ_from_Gν(r.G,r.ν)))
 
-
+free_energy_convexity(r::Rheology,D) = 1/compute_Γ(r,compute_A1B1(r,D)...) > 0 ? true : false
 # eq 16 Bhat2012 & 2016 & notes (because in Bhat2011 c2 isn't the same form as in Harsha's notes) :
 #compute_c1(d::Damage,D) = sqrt(1-cos(d.ψ)^2)/(π*cos(d.ψ)^(3/2)*((D/d.D₀)^(1/3) - 1 + d.β/cos(d.ψ))^(3/2))
 function compute_c1(r,D)
@@ -223,6 +223,21 @@ function compute_subcrit_damage_rate(r::Rheology, KI, D)
   return dDdl * dldt
 end
 
+function compute_free_energy(r,D,ϵij)
+  G = r.G
+  ν = r.ν
+  ϵ = tr(ϵij)
+  e = dev(ϵij)
+  γ = sqrt(2.0 * e ⊡ e)
+
+  A1, B1 = compute_A1B1(r,D)
+  Γ = compute_Γ(r,A1,B1)
+  a1 = compute_a1(B1,Γ)
+  b1 = compute_b1(A1,B1,Γ)
+  b2 = compute_b2(r,A1,Γ)
+
+  return G * (0.5*a1*ϵ^2 + 0.5*b2*γ^2 + b1*ϵ*γ)
+end
 
 function compute_σij(r,A1,B1,Γ,ϵij)
   # TODO make a visco elastic version of this function

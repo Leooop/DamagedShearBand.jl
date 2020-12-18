@@ -147,3 +147,58 @@ plot(t_vec_a,[ϵᵢⱼ[1,1] for ϵᵢⱼ in ϵᵢⱼ_vec_a])
 plot([-ϵᵢⱼ[1,1] for ϵᵢⱼ in ϵᵢⱼ_vec_a],[-σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_a])
 
 plot!(t_vec_a[2:end],-diff(t_vec_a).*3e8)
+
+function merge_series!(sp1::Plots.Subplot, sp2::Plots.Subplot)
+  append!(sp1.series_list, sp2.series_list)
+  Plots.expand_extrema!(sp1[:xaxis], xlims(sp2))
+  Plots.expand_extrema!(sp1[:yaxis], ylims(sp2))
+  Plots.expand_extrema!(sp1[:zaxis], zlims(sp2))
+  return sp1
+end
+
+function merge_series!(plt, plts...)
+  for (i, sp) in enumerate(plt.subplots)
+      for other_plt in plts
+          if i in eachindex(other_plt.subplots)
+              merge_series!(sp, other_plt[i])
+          end
+      end
+  end
+  return plt
+end
+##
+layout = @layout [a ; b]
+l2 = @layout [a ; b]
+
+p1 = plot(-ϵ₁₁_vec,-σ₁₁_vec)
+#plot(p1,-ϵ₁₁_vec,-σ₁₁_vec)
+title!(p1,"D0 = $(r.D₀) & epsdot = $(ϵ̇₁₁) & p=$(-σ₂₂)")
+ylabel!("-σ₁₁")
+
+p2 = plot(-ϵ₁₁_vec,D_vec,c=:red)
+#plot(p2,-ϵ₁₁_vec,D_vec,c=:red)
+ylabel!("D")
+xlabel!("-ϵ₁₁")
+
+pl1 = plot(p1,p2,layout=layout)
+##
+p3 = plot(-ϵ₁₁_vec.+0.0001,-σ₁₁_vec)
+#plot(p1,-ϵ₁₁_vec,-σ₁₁_vec)
+title!(p1,"D0 = $(r.D₀) & epsdot = $(ϵ̇₁₁) & p=$(-σ₂₂)")
+ylabel!("-σ₁₁")
+
+p4 = plot(-ϵ₁₁_vec,D_vec,c=:red)
+#plot(p2,-ϵ₁₁_vec,D_vec,c=:red)
+ylabel!("D")
+xlabel!("-ϵ₁₁")
+
+pl2 = plot(p3,p4,layout=l2)
+
+##
+function test_func(args...) 
+  return sum([args...])
+end
+
+test_func(1,2,3) 
+nt = (a=1,b=2)
+@time isdefined(nt,:a)

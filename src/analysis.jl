@@ -152,27 +152,39 @@ end
 #####################
 ## Second strategy ##
 #####################
+function adaptative_time_integration(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
+  #unpack
+  time_maxiter = p.solver.time_maxiter
 
-function adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, time_maxiter=nothing, newton_maxiter=100, e₀=1e-12, print_frequency=1)
+  # initializations
   t_vec = Float64[tspan[1]]
   tsim = tspan[1]
   σᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
   ϵᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
   D_vec = Float64[D_i]
+  σᵢⱼnext = σᵢⱼ_i
+  ϵᵢⱼnext = ϵᵢⱼ_i
+  Dnext = D_i
+  Δt_next = Δt
+  last_tsim_printed = 0.0
+  last_tsim_saved = 0.0 
   i = 1 # iter counter
   while tsim < tspan[2]
-    if i%print_frequency == 0
-      println("------")
-      println("time iteration $(length(t_vec)) : $tsim")
-      println("------")
+    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
+    print_flag && print_time_iteration(i,tsim)
+
+    σᵢⱼnext, ϵᵢⱼnext, Dnext, Δt_used, Δt_next = adaptative_Δt_solve(r,p,σᵢⱼnext,ϵᵢⱼnext,Dnext,ϵ̇11,Δt_next)
+
+    tsim += Δt_used
+
+    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
+    if save_flag
+      push!(σᵢⱼ_vec,σᵢⱼnext)
+      push!(ϵᵢⱼ_vec,ϵᵢⱼnext)
+      push!(D_vec,Dnext)
+      push!(t_vec,tsim)
     end
-    σᵢⱼnext, ϵᵢⱼnext, Dnext, Δt_used, Δt_next = adaptative_Δt_solve(r,σᵢⱼ_vec[end],ϵᵢⱼ_vec[end],D_vec[end],ϵ̇11,Δt ; abstol, maxiter=newton_maxiter, e₀)
-    push!(σᵢⱼ_vec,σᵢⱼnext)
-    push!(ϵᵢⱼ_vec,ϵᵢⱼnext)
-    push!(D_vec,Dnext)
-    tsim = t_vec[end] + Δt_used
-    push!(t_vec,tsim)
-    Δt = Δt_next
+
     i += 1
     if !isnothing(time_maxiter)
       (length(t_vec)==time_maxiter+1) && break
@@ -181,25 +193,30 @@ function adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspa
   return t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec
 end
 
-function adaptative_Δt_solve(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e-12, maxiter=100,e₀=1e-12)
-  σᵢⱼnext1, ϵᵢⱼnext1, Dnext1, u1 = solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol, maxiter)
-  σᵢⱼmid, ϵᵢⱼmid, Dmid, umid = solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt/2 ; abstol, maxiter)
-  σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, u2 = solve_2(r,σᵢⱼmid,ϵᵢⱼmid,Dmid,ϵ̇11,Δt/2 ; abstol, maxiter)
 
-  # compute errors for each unknowns type and ponderate the acceptance
+
+function adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
+  e₀ = p.solver.e₀
+
+  σᵢⱼnext1, ϵᵢⱼnext1, Dnext1, u1 = solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
+  σᵢⱼmid, ϵᵢⱼmid, Dmid, umid = solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt/2)
+  σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, u2 = solve(r,p,σᵢⱼmid,ϵᵢⱼmid,Dmid,ϵ̇11,Δt/2)
+
+  # compute errors for each unknowns physical quantity and ponderate 
   eD = Dnext2-Dnext1
   eσ = norm((u2-u1)[1:2])
   eϵ = norm((u2-u1)[3])
   if e₀ isa Real
     e₀ref = e₀
-    e_normalized = (eD,eσ/r.G,eϵ)
-    ok_flag = all(e_normalized.<e₀)
+    e_normalized = (eD, eσ/r.G, eϵ)
+    ok_flag = all(e_normalized.<e₀)m
     e = maximum(e_normalized)
   elseif e₀ isa NamedTuple
     e₀ref = e₀.D
     ok_flag = (eD<e₀.D) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
     e_normalized = (eD, eσ*(e₀ref/e₀.σ), eϵ*(e₀ref/e₀.ϵ))
-    e = maximum(e_normalized)
+    e,ind = findmax(e_normalized)
+    ok_flag || @debug("maximum error comes from indice $(ind) of (D,σ,ϵ)")
   end
 
   if ok_flag
@@ -209,12 +226,13 @@ function adaptative_Δt_solve(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e
     return σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, Δt, Δt_next
   else
     # recursively run with decreased timestep
-    adaptative_Δt_solve(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11, Δt*abs(e₀ref/e)^2 ; abstol, maxiter,e₀)
+    adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11, Δt*abs(e₀ref/e)) 
+    #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
   end
 
 end
 
-function time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100,print_frequency=1)
+function time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
   t_vec = tspan[1]:Δt:tspan[2]
   σᵢⱼ_vec = Vector{SymmetricTensor{2,3}}(undef,length(t_vec))
   ϵᵢⱼ_vec = similar(σᵢⱼ_vec)
@@ -222,19 +240,18 @@ function time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=
   σᵢⱼ_vec[1] = σᵢⱼ_i
   ϵᵢⱼ_vec[1] = ϵᵢⱼ_i
   D_vec[1] = D_i
+  last_tsim_printed = 0.0
   for i in 2:length(t_vec)
-    if i%print_frequency == 0
-      println("------")
-      println("time iteration $(i-1)")
-      println("------")
-    end
-    σᵢⱼ_vec[i], ϵᵢⱼ_vec[i], D_vec[i], u = solve_2(r,σᵢⱼ_vec[i-1],ϵᵢⱼ_vec[i-1],D_vec[i-1],ϵ̇11,Δt ; abstol, maxiter)
+    print_flag, last_tsim_printed = get_print_flag(p,i,t_vec[i-1],last_tsim_printed)
+    print_flag && print_time_iteration(i,t_vec[i-1])
+  
+    σᵢⱼ_vec[i], ϵᵢⱼ_vec[i], D_vec[i], u = solve(r,p,σᵢⱼ_vec[i-1],ϵᵢⱼ_vec[i-1],D_vec[i-1],ϵ̇11,Δt)
   end
   return t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec
 end
 
-function solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e-12, maxiter=100)
-
+function solve(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
+  ps = p.solver
   D = D_i
   # get first guess of the unknowns with an elastic solve
   ϵᵢⱼnext = insert_into(ϵᵢⱼ_i, (ϵᵢⱼ_i[1,1] + ϵ̇11*Δt), (1,1))
@@ -242,9 +259,9 @@ function solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e-12, maxiter=
   #σᵢⱼnext = insert_into(σᵢⱼnext, -1e6, (2,2))
   u = Vec(σᵢⱼnext[1,1], σᵢⱼnext[3,3], ϵᵢⱼnext[2,2])
   #@debug "u_i = $u"
-  for i in 1:maxiter
+  for i in 1:ps.newton_maxiter
     # get residual and its gradient with respect to u
-    ∇res , res = Tensors.gradient(u -> residual_2(r,D,ϵᵢⱼ_i,ϵᵢⱼnext,σᵢⱼ_i,σᵢⱼnext,Δt,u), u, :all)
+    ∇res , res = Tensors.gradient(u -> residual(r,D,ϵᵢⱼ_i,ϵᵢⱼnext,σᵢⱼ_i,σᵢⱼnext,Δt,u), u, :all)
     #@debug "norm res = $(norm(res))"
     #@debug "∇res = $∇res"
 
@@ -254,9 +271,9 @@ function solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e-12, maxiter=
     #@debug "δu = $δu"
     #@debug "typeof(u) = $(typeof(u))"
 
-    (norm(res) <= abstol) && break
+    (norm(res) <= ps.newton_abstol) && break
     
-    (i == maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+    (i == ps.newton_maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
   end
   # update ϵᵢⱼnext and σᵢⱼnext with converged u
   ϵᵢⱼnext = insert_into(ϵᵢⱼnext, u[3], (2,2)) 
@@ -266,14 +283,14 @@ function solve_2(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt ; abstol=1e-12, maxiter=
   return σᵢⱼnext, ϵᵢⱼnext, D, u
 end
 
-function residual_2(r,D,ϵij,ϵijnext,σij,σijnext,Δt,u)
+function residual(r,D,ϵij,ϵijnext,σij,σijnext,Δt,u)
   σ11next, σ33next, ϵ22next = u
   σijnext = insert_into(σijnext, (σ11next, σ33next), ((1,1),(3,3)))
   ϵijnext = insert_into(ϵijnext, ϵ22next, (2,2))
   ϵ̇ij_analytical, _ = compute_ϵ̇ij(r,D,σij,σijnext,Δt)
   ϵ̇ij = (ϵijnext - ϵij)/Δt
   Δϵ̇ij = ϵ̇ij_analytical - ϵ̇ij
-  @debug " KI = $(compute_KI(r,σijnext, D))"
+  #@debug " KI = $(compute_KI(r,σijnext, D))"
   return Vec(Δϵ̇ij[1,1],Δϵ̇ij[2,2],Δϵ̇ij[3,3]) 
 end
 
@@ -293,3 +310,37 @@ function map_id_to_value(tensor::SymmetricTensor,values,indices,i,j)
     return tensor[i,j]
   end
 end
+
+function get_print_flag(p,iter,tsim,last_tsim_printed)
+  if (iter==1) | print_flag_condition(p,iter,tsim,last_tsim_printed)
+    print_flag = true
+    last_tsim_printed = tsim
+  else 
+    print_flag = false
+  end
+  return print_flag, last_tsim_printed
+end
+
+function get_save_flag(p,iter,tsim,last_tsim_saved)
+  if (iter==1) | save_flag_condition(p,iter,tsim,last_tsim_saved)
+    save_flag = true
+    last_tsim_saved = tsim
+  else 
+    save_flag = false
+  end
+  return save_flag, last_tsim_saved
+end
+
+print_flag_condition(p::Params{TF,Nothing},iter,tsim,last_tsim) where {TF<:Real} = ( (tsim-last_tsim) >= (1/p.output.print_frequency) )
+print_flag_condition(p::Params{Nothing,TP},iter,tsim,last_tsim) where {TP<:Real} = (iter%p.output.print_period == 0)
+function print_flag_condition(p::Params{TF,TP},iter,tsim,last_tsim) where {TF<:Real,TP<:Real}
+  return ( (tsim-last_tsim) >= (1/p.output.print_frequency) ) || (iter%p.output.print_period == 0)
+end
+
+save_flag_condition(p::Params{T1,T2,TF,Nothing},iter,tsim,last_tsim) where {T1,T2,TF<:Real} = ( (tsim-last_tsim) >= (1/p.output.save_frequency) )
+save_flag_condition(p::Params{T1,T2,Nothing,TP},iter,tsim,last_tsim) where {T1,T2,TP<:Real} = (iter%p.output.save_period == 0)
+function save_flag_condition(p::Params{T1,T2,TF,TP},iter,tsim,last_tsim) where {T1,T2,TF<:Real,TP<:Real}
+  return ( (tsim-last_tsim) >= (1/p.output.save_frequency) ) || (iter%p.output.save_period == 0)
+end
+
+print_time_iteration(iter,tsim) = print("------","\n","time iteration $iter : $tsim","\n","------")

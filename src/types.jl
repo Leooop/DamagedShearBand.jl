@@ -15,6 +15,25 @@ using Base: @kwdef
   A::Float64 = 5.71 # Preexponential factor (m/s)
 end
 
+function Rheology(r::Rheology, kw::NamedTuple)
+  values_dict = Dict{Symbol,Float64}()
+  for sym in propertynames(r)
+    values_dict[sym] = isdefined(kw,sym) ? getproperty(kw,sym) : getproperty(r,sym)
+  end
+  return Rheology(; G = values_dict[:G],
+                    ν = values_dict[:ν],
+                    μ = values_dict[:μ],
+                    β = values_dict[:β],
+                    K₁c = values_dict[:K₁c],
+                    a = values_dict[:a],
+                    ψ = values_dict[:ψ],
+                    D₀ = values_dict[:D₀],
+                    n = values_dict[:n],
+                    l̇₀ = values_dict[:l̇₀],
+                    H = values_dict[:H],
+                    A = values_dict[:A])
+end
+
 function Base.show(io::IO, ::MIME"text/plain", r::Rheology)
   print(io, "Rheology instance with fields :\n",
   "\t├── G (shear modulus)                             : $(r.G)\n",
@@ -30,3 +49,30 @@ function Base.show(io::IO, ::MIME"text/plain", r::Rheology)
   "\t├── H (Activation enthalpy (J/mol))               : $(r.H)\n",
   "\t└── A (preexponetial factor (m/s))                : $(r.A)\n")
 end
+
+Maybe(T)=Union{T,Nothing}
+
+@kwdef struct SolverParams{TI<:Maybe(Integer),TE<:Union{Real,NamedTuple}}
+  newton_abstol::Float64 = 1e-12
+  newton_maxiter::Int = 100
+  time_maxiter::TI = nothing
+  e₀::TE = 1e-12
+end
+
+@kwdef struct OutputParams{T1<:Maybe(Real),T2<:Maybe(Integer),T3<:Maybe(Real),T4<:Maybe(Integer)}
+  print_frequency::T1=nothing
+  print_period::T2=1
+  save_frequency::T3=nothing
+  save_period::T4=1
+end
+
+#OutputParams(::T1,::T2,::T3,::T4) where{T1<:Real,T2<:Real}
+
+struct Params{T1,T2,T3,T4,TI,TE}
+  solver::SolverParams{TI,TE}
+  output::OutputParams{T1,T2,T3,T4}
+end
+
+Params(o::OutputParams,s::SolverParams) = Params(s::SolverParams,o::OutputParams)
+
+# Model type ? 2points, 1point
