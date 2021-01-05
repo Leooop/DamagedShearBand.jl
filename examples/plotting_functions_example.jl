@@ -21,7 +21,7 @@ function plot_simulations(r_vec,t_vec_vec, σᵢⱼ_vec_vec, ϵᵢⱼ_vec_vec, D
     σ₁₁_vec = [σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec]
     ϵ₁₁_vec = [ϵᵢⱼ[1,1] for ϵᵢⱼ in ϵᵢⱼ_vec]
     ϵₖₖ_vec = [tr(ϵᵢⱼ) for ϵᵢⱼ in ϵᵢⱼ_vec]
-    #KInorm_vec = [DSB.compute_KI(r,σᵢⱼ_vec[i], D_vec[i])/r.K₁c for i in eachindex(σᵢⱼ_vec)]
+    KInorm_vec = [DSB.compute_KI(r,σᵢⱼ_vec[i], D_vec[i])/r.K₁c for i in eachindex(σᵢⱼ_vec)]
 
     if i == 1
       plotids = plot_first_simulation(σ₁₁_vec, ϵ₁₁_vec, ϵₖₖ_vec, D_vec)
@@ -42,19 +42,19 @@ function plot_simulations(r_vec,t_vec_vec, σᵢⱼ_vec_vec, ϵᵢⱼ_vec_vec, D
   return plt
 end
 
-function plot_first_simulation(σ₁₁_vec, ϵ₁₁_vec, ϵₖₖ_vec, D_vec)
+function plot_first_simulation(σ₁₁_vec, ϵ₁₁_vec, ϵₖₖ_vec, D_vec, KInorm_vec)
   plt1 = plot(-ϵ₁₁_vec.*100,-σ₁₁_vec.*1e-6,label=nothing)
   plt2 = plot(-ϵ₁₁_vec.*100,D_vec,label=nothing)
-  #plot!(-ϵ₁₁_vec.*100,KInorm_vec)
+  plot!(plt2,-ϵ₁₁_vec.*100,KInorm_vec)
   plt3 = plot(-ϵ₁₁_vec.*100,ϵₖₖ_vec,label=nothing)
   return plt1, plt2, plt3
 end
 
-function add_data_to_plot!(plotids,σ₁₁_vec, ϵ₁₁_vec, ϵₖₖ_vec, D_vec)
+function add_data_to_plot!(plotids,σ₁₁_vec, ϵ₁₁_vec, ϵₖₖ_vec, D_vec, KInorm_vec)
   plt1, plt2, plt3 = plotids
   plot!(plt1,-ϵ₁₁_vec.*100,-σ₁₁_vec.*1e-6,label=nothing)
   plot!(plt2,-ϵ₁₁_vec.*100,D_vec,label=nothing)
-  #plot!(plt2,-ϵ₁₁_vec,KInorm_vec)
+  plot!(plt2,-ϵ₁₁_vec,KInorm_vec)
   plot!(plt3,-ϵ₁₁_vec.*100,ϵₖₖ_vec,label=nothing)
   return plt1, plt2, plt3
 end

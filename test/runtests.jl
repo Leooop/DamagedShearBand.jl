@@ -9,13 +9,13 @@ D = r.D₀
 
 @testset "get_plane_strain_oop_stress" begin
     atol=1e-12
-    σᵢⱼ_cor = set_plane_strain_oop_stress(σᵢⱼ, r, D ; abstol=atol, maxiter=100, σoop_guess=nothing)
+    σᵢⱼ_cor = DSB.set_plane_strain_oop_stress(σᵢⱼ, r, D ; abstol=atol, maxiter=100, σoop_guess=nothing)
     ϵoop = DSB.compute_ϵ_oop(r,D,σᵢⱼ_cor)
     @test abs(ϵoop)<=atol
 end
 
 @testset "get_damage_onset" begin
-    Sc = get_damage_onset(r,σ₃,r.D₀)
+    Sc = DSB.get_damage_onset(r,σ₃,r.D₀)
 
     # KI at damage onset
     σᵢⱼ_onset = DSB.build_principal_stress_tensor(r,Sc,σ₃)
@@ -33,15 +33,18 @@ end
     @test KI_down < 0
 end
 
-@testset "change_coords" begin
-    σ0 = DSB.change_coords(σᵢⱼ,0) # plane is vertical, 
+@testset "band_coords" begin
+    σ0 = DSB.band_coords(σᵢⱼ,0) # plane is vertical, 
     @test σ0[1,1] == σᵢⱼ[2,2]
-    σm90 = DSB.change_coords(σᵢⱼ,-90) # plane is vertical, 
+    σm90 = DSB.band_coords(σᵢⱼ,-90) # plane is horizontal, 
     @test all(σm90 .== σᵢⱼ)
-    σ90 = DSB.change_coords(σᵢⱼ,90) # plane is horizontal, 
+    σ90 = DSB.band_coords(σᵢⱼ,90) # plane is horizontal, 
     @test all(σ90 .== σᵢⱼ)
-    σ90 = DSB.change_coords(σᵢⱼ,90+360) # plane is horizontal, 
+    σ90 = DSB.band_coords(σᵢⱼ,90+360) # plane is horizontal, 
     @test all(σ90 .== σᵢⱼ)
+    σ_rotated = DSB.band_coords(σᵢⱼ,30)
+    σ_back = DSB.principal_coords(σ_rotated,30)
+    @test σ_back ≈ σᵢⱼ
 end
 
 @testset "get_KI_minimizer_D" begin
@@ -68,11 +71,25 @@ end
     σ₃ = -1e6
     S = 1
     
+    n_iter_saved = 5000
+    n_iter_printed = 10
+    op = DSB.OutputParams(save_frequency = n_iter_saved/(tspan[2]-tspan[1]),
+                        save_period = nothing,
+                        print_frequency = n_iter_printed/(tspan[2]-tspan[1]),
+                        print_period = nothing)
+
+    sp = DSB.SolverParams(newton_abstol = 1e-12,
+                        newton_maxiter = 100,
+                        time_maxiter = nothing,
+                        e₀ = (D=1e-1, σ=100.0, ϵ=1e-3)) 
+
+    p = DSB.Params(op,sp)
+
     σᵢⱼ_i = DSB.build_principal_stress_tensor(r,S,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint
     ϵᵢⱼ_i = DSB.compute_ϵij(r,D_i,σᵢⱼ_i)
-    t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
+    t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
 
-    Ce = DSB.get_elastic_stiffness_tensor(r::Rheology)
+    Ce = DSB.get_elastic_stiffness_tensor(r)
     σᵢⱼ_vec_elast = Ref(Ce) .⊡ ϵᵢⱼ_vec
 
     @test all([σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_elast])
@@ -90,5 +107,19 @@ end
     tan_mod_theoretical = Emod/(1-r.ν^2)
     @test abs(tan_mod_Dat0_model-tan_mod_theoretical) < 1e-2
     @test abs(tan_mod_elast_model-tan_mod_theoretical) < 1e-2
+end
+
+@testset "from principal stress to band orientation" begin
+    θ = 60.0
+    Ṡ = 1e-2
+    Δt = 1
+    σᵢⱼ_principal = DSB.build_principal_stress_tensor(r,S,σ₃,D ; abstol=1e-15)
+    σᵢⱼ1 = DSB.compute_rotated_stress_rate_from_principal_coords(r,Ṡ,σ₃,σᵢⱼ_principal,D,Δt,θ ; damaged_allowed=true)
+    σᵢⱼ2 = DSB.compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,DSB.band_coords(σᵢⱼ_principal,θ),D,Δt,θ; damaged_allowed=true)
+    @test all(σᵢⱼ1 .≈ σᵢⱼ2)
+end
+
+@testset "get_stress_deviation_from_far_field" begin
+    σᵢⱼ = DSB.build_principal_stress_tensor(r,S,σ₃,D)
 
 end

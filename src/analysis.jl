@@ -4,18 +4,12 @@ function set_plane_strain_oop_stress(σᵢⱼ,r,D ; abstol=1e-12, maxiter=100, �
   !isnothing(σoop_guess) && (σᵢⱼ = insert_σoop(σᵢⱼ,σoop_guess))
   σoop = σᵢⱼ[3,3]
   # get damage constants:
-  if r.D₀ == 0
-    A1,B1 = 0.0, 0.0
-  else
-    A1,B1 = compute_A1B1(r,D)
-  end
+  A1::Float64,B1::Float64 = compute_A1B1(r,D)
+
   for i in 1:maxiter
-    # Joint computation of value and grad of ϵ_oop
-    # result = GradientResult(σᵢⱼ)
-    # gradient!(result, σᵢⱼ -> compute_ϵ_oop(r,A1,B1,σᵢⱼ), σᵢⱼ)
-    # dϵ_oop = DiffResults.gradient(result)[3,3] # keep only derivative wrt σoop
-    # ϵ_oop = value(result)
+    
     dϵ_oop, ϵ_oop = Tensors.gradient(σᵢⱼ -> compute_ϵ_oop(r,A1,B1,σᵢⱼ), σᵢⱼ, :all)
+    #println(dϵ_oop)
     dϵ_oop = dϵ_oop[3,3]
     # Newton update
     σoop = σoop - ϵ_oop/dϵ_oop
@@ -26,11 +20,31 @@ function set_plane_strain_oop_stress(σᵢⱼ,r,D ; abstol=1e-12, maxiter=100, �
   return σᵢⱼ
 end
 
-function insert_σoop(σᵢⱼ::Tensor{2,3},σoop_guess)
-  σᵢⱼ = Tensor{2,3}([σᵢⱼ[1,1] σᵢⱼ[1,2] σᵢⱼ[1,3] ; σᵢⱼ[2,1] σᵢⱼ[2,2] σᵢⱼ[2,3] ; σᵢⱼ[3,1] σᵢⱼ[3,2] σoop_guess])
-end
-function insert_σoop(σᵢⱼ::SymmetricTensor{2,3},σoop_guess)
-  σᵢⱼ = SymmetricTensor{2,3}([σᵢⱼ[1,1] σᵢⱼ[1,2] σᵢⱼ[1,3] ; σᵢⱼ[2,1] σᵢⱼ[2,2] σᵢⱼ[2,3] ; σᵢⱼ[3,1] σᵢⱼ[3,2] σoop_guess])
+function set_plane_strain_oop_stress_rate(σᵢⱼ,σ̇ᵢⱼ,r,D,Δt ; abstol=1e-16, maxiter=100, damaged_allowed=true)
+  # If the initial out of plane is different from σ₃₃ insert a guess
+  #!isnothing(σoop_guess) && (σᵢⱼ = insert_σoop(σᵢⱼ,σoop_guess)) # Removed because of type inference issues
+  σoop = σᵢⱼ[3,3]
+  σoop_rate = σ̇ᵢⱼ[3,3]
+  σᵢⱼnext = σᵢⱼ + σ̇ᵢⱼ*Δt
+  # get damage constants:
+  A1,B1 = compute_A1B1(r,D)
+  # preallocate differentiation results
+  result = DiffResults.GradientResult(σᵢⱼnext) # careful, result stores values in Matrix not Tensor
+  for i in 1:maxiter
+    # Joint computation of value and grad of ϵ_oop
+    ForwardDiff.gradient!(result, σᵢⱼnext -> compute_ϵ̇ij(r,D,σᵢⱼ,σᵢⱼnext,Δt ; damaged_allowed)[1][3,3], σᵢⱼnext)
+    dϵ̇_oop = DiffResults.gradient(result)
+    ϵ̇_oop  = DiffResults.value(result)
+    #println(dϵ̇_oop)
+    dϵ̇_oop_dσ̇_oop = dϵ̇_oop[3,3]
+    # Newton update
+    σoop_rate = σoop_rate - ϵ̇_oop/dϵ̇_oop_dσ̇_oop
+    σᵢⱼnext = insert_σoop(σᵢⱼnext,σoop_rate)
+    # exit condition
+    (abs(ϵ̇_oop) <= abstol) && break
+  end
+  σ̇ᵢⱼ = (σᵢⱼnext - σᵢⱼ)/Δt
+  return σ̇ᵢⱼ
 end
 
 function get_damage_onset(r::Rheology,σ₃,D)
@@ -55,6 +69,27 @@ function get_KI_mininizer_D(r,S,σ₃)
   return Dc
 end
 
+function get_KI_mininizer_D_on_S_range(r,Smin,Smax,σ₃ ; len=1000)
+  S_vec = range(Smin,Smax ; length=len)
+  D_vec = range(r.D₀,0.999 ; length=len)
+  σᵢⱼ_mat = [build_principal_stress_tensor(r,S,σ₃,D) for S in S_vec, D in D_vec]
+  D_mat = repeat(D_vec',outer=(length(S_vec),1))
+  KI_mat = compute_KI.(Ref(r),σᵢⱼ_mat,D_mat)
+  Dc = 0.0
+  S = 0.0
+  for iS in reverse(axes(S_vec,1))
+    valmin, idmin = findmin(KI_mat[iS,:])
+    if valmin > 0
+      continue
+    else
+      S = S_vec[iS]
+      Dc = get_KI_mininizer_D(r,S,σ₃)
+      break
+    end
+  end
+  return Dc, S
+end
+
 function KI_from_external_load(r,S,σ₃,D)
   σij = build_principal_stress_tensor(r,S,σ₃,D)
   KI = compute_KI(r,σij,D)
@@ -62,96 +97,38 @@ function KI_from_external_load(r,S,σ₃,D)
 end
 
 function build_principal_stress_tensor(r,S,σ₃ ; abstol=1e-15)
-  σᵢⱼ_prev = SymmetricTensor{2,3}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
+  σᵢⱼ_prev = SymmetricTensor{2,3,Float64}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
   return set_plane_strain_oop_stress(σᵢⱼ_prev,r,r.D₀ ; abstol)
 end
 
 function build_principal_stress_tensor(r,S,σ₃,D ; abstol=1e-15)
-  σᵢⱼ_prev = SymmetricTensor{2,3}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
+  σᵢⱼ_prev = SymmetricTensor{2,3,Float64}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
   return set_plane_strain_oop_stress(σᵢⱼ_prev,r,D ; abstol)
 end
 
-# function build_stress_tensor(r,S,σ₃,D)
-#   A1, B1 = compute_A1B1(r,D)
-#   Γ = compute_Γ(r,A1,B1)
-#   σᵢⱼ_prev = compute_σij(r,A1,B1,Γ,ϵij)
-#   return set_plane_strain_oop_stress(σᵢⱼ_prev,r,r.D₀)
-# end
-
-function change_coords(σᵢⱼ,θ)
+function band_coords(σᵢⱼ,θ)
   Q = Tensor{2,2}([sind(θ) cosd(θ) ; -cosd(θ) sind(θ)])
-  σ2D = Tensor{2,2}(σᵢⱼ[1:2,1:2])
+  σ2D = Tensor{2,2,eltype(σᵢⱼ)}(σᵢⱼ[1:2,1:2])
   σ2D_rotated = Q ⋅ σ2D ⋅ Q'
-  σᵢⱼ_rotated = Tensor{2,3}([σ2D_rotated zeros(eltype(σᵢⱼ),2) ; [zero(eltype(σᵢⱼ)) zero(eltype(σᵢⱼ)) σᵢⱼ[3,3]]])
+  σᵢⱼ_rotated = SymmetricTensor{2,3,eltype(σᵢⱼ)}((σ2D_rotated[1,1],σ2D_rotated[2,1],σᵢⱼ[3,1],σ2D_rotated[2,2],σᵢⱼ[3,2],σᵢⱼ[3,3]))
+  #σᵢⱼ_rotated = Tensor{2,3}([σ2D_rotated zeros(eltype(σᵢⱼ),2) ; [zero(eltype(σᵢⱼ)) zero(eltype(σᵢⱼ)) σᵢⱼ[3,3]]])
   return σᵢⱼ_rotated
 end
 
-## Solve related functions :
+function principal_coords(σᵢⱼ,θ)
+  Q = Tensor{2,2}([sind(θ) -cosd(θ) ; cosd(θ) sind(θ)])
+  σ2D = Tensor{2,2,eltype(σᵢⱼ)}(σᵢⱼ[1:2,1:2])
+  σ2D_rotated = Q ⋅ σ2D ⋅ Q'
+  σᵢⱼ_rotated = SymmetricTensor{2,3,eltype(σᵢⱼ)}((σ2D_rotated[1,1],σ2D_rotated[2,1],σᵢⱼ[3,1],σ2D_rotated[2,2],σᵢⱼ[3,2],σᵢⱼ[3,3]))
+  #σᵢⱼ_rotated = Tensor{2,3}([σ2D_rotated zeros(eltype(σᵢⱼ),2) ; [zero(eltype(σᵢⱼ)) zero(eltype(σᵢⱼ)) σᵢⱼ[3,3]]])
+  return σᵢⱼ_rotated
+end
 
 
-# function solve(r,σᵢⱼ_in,ϵᵢⱼ_in,knowns,unknowns,D,Δt ; abstol=1e-12, maxiter=100)
-#   Ḋ = zero(D)
-#   ΔD = zero(Ḋ)
-#   ∇res = similar(knowns)
-#   res = similar(knowns)
-#   u = unknowns
-#   ϵᵢⱼ_in_next = ϵᵢⱼ_in
-#   σᵢⱼ_in_next = σᵢⱼ_in
-#   for i in 1:maxiter
-#     Ḋ = compute_subcrit_damage_rate(r, compute_KI(r,σᵢⱼ_in_next,D), D)
-#     ΔD = Ḋ*Δt
-#     ∇res , res = Tensors.gradient(unknowns -> residual(r, ϵᵢⱼ_in_next, D+ΔD, knowns, unknowns), u, :all)
-#     δu = - ∇res\res
-#     u = u + δu
-#     ϵᵢⱼ_in_next = increment_ϵᵢⱼ_in(ϵᵢⱼ_in,knowns,u)
-#     σᵢⱼ_in_next = increment_σᵢⱼ_in(r,σᵢⱼ_in,D+ΔD,knowns,u) 
-#     (abs(res) <= abstol) && break
-#     @debug "abs res = $(abs(res))"
-#     (i == maxiter) && @warn("maxiter reached, residual still higher than abstol")
-#   end
-#   D = D + ΔD
-#   return σᵢⱼ_in_next, ϵᵢⱼ_in_next, knowns, u, D
-# end
+#############################
+## Solve related functions ##
+#############################
 
-# function residual(r, ϵᵢⱼ, D, knowns, unknowns)
-#   Δσηη , Δσξη, Δϵξξ = knowns
-#   Δσξξ, Δϵηη, Δϵξη = unknowns
-#   Δϵ_in = SymmetricTensor{2,3}([Δϵξξ Δϵξη  0 ; 
-#                                 Δϵξη Δϵηη  0 ;
-#                                  0    0    0 ])
-#   # Δσ_in out of plane guess is an elastic undamaged one
-#   Δσ_in_guess = SymmetricTensor{2,3}([ Δσξξ  Δσξη 0 ; 
-#                                        Δσξη  Δσηη 0 ;
-#                                         0     0   r.ν*(Δσξξ + Δσηη) ])
-#   Δσ_in = set_plane_strain_oop_stress(Δσ_in_guess, r, D)
-#   # staggered stiffness tensor
-#   C = compute_damaged_stiffness_tensor(r,(2*ϵᵢⱼ+Δϵ_in)/2,D)
-#   # stress from stiffness tensor and deformation
-#   Δσ_in_from_ϵ = C ⊡ Δϵ_in
-#   ΔΔσ = Δσ_in - Δσ_in_from_ϵ
-#   return Vec(ΔΔσ[1,1], ΔΔσ[2,2], ΔΔσ[3,3])
-#   #return norm(Δσ_in[1,2] - Δσ_in_from_ϵ[1,2], Δσ_in[2,2] - Δσ_in_from_ϵ[2,2])
-# end
-
-# function increment_ϵᵢⱼ_in(ϵᵢⱼ,knowns,unknowns) 
-#   _ , _, Δϵξξ = knowns
-#   _, Δϵηη, Δϵξη = unknowns
-#   Δϵᵢⱼ = SymmetricTensor{2,3}([Δϵξξ Δϵξη 0 ; Δϵξη Δϵηη 0 ; 0 0 0])
-#   ϵᵢⱼ_next = ϵᵢⱼ + Δϵᵢⱼ
-#   return ϵᵢⱼ_next
-# end
-
-# function increment_σᵢⱼ_in(r,σᵢⱼ,D,knowns,unknowns) 
-#   Δσηη , Δσξη, _ = knowns
-#   Δσξξ, _, _ = unknowns
-#   Δσᵢⱼ = SymmetricTensor{2,3}([Δσξξ Δσξη 0 ; Δσξη Δσξξ 0 ; 0 0 r.ν*(Δσξξ+Δσξξ) ])
-#   σᵢⱼ_next = set_plane_strain_oop_stress(σᵢⱼ + Δσᵢⱼ, r, D)
-#   return σᵢⱼ_next
-# end
-
-#####################
-## Second strategy ##
-#####################
 function adaptative_time_integration(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
   #unpack
   time_maxiter = p.solver.time_maxiter
@@ -167,7 +144,7 @@ function adaptative_time_integration(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i
   Dnext = D_i
   Δt_next = Δt
   last_tsim_printed = 0.0
-  last_tsim_saved = 0.0 
+  last_tsim_saved = 0.0
   i = 1 # iter counter
   while tsim < tspan[2]
     print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
@@ -209,7 +186,7 @@ function adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
   if e₀ isa Real
     e₀ref = e₀
     e_normalized = (eD, eσ/r.G, eϵ)
-    ok_flag = all(e_normalized.<e₀)m
+    ok_flag = all(e_normalized.<e₀)
     e = maximum(e_normalized)
   elseif e₀ isa NamedTuple
     e₀ref = e₀.D
@@ -294,53 +271,530 @@ function residual(r,D,ϵij,ϵijnext,σij,σijnext,Δt,u)
   return Vec(Δϵ̇ij[1,1],Δϵ̇ij[2,2],Δϵ̇ij[3,3]) 
 end
 
-function insert_into(tensor::SymmetricTensor{2,S},values,indices) where{S}
-  return SymmetricTensor{2,S}((i,j) -> map_id_to_value(tensor,values,indices,i,j))
-end
+function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,Dⁱ,Dᵒ,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan)
+  #unpack
+  time_maxiter = p.solver.time_maxiter
 
-function map_id_to_value(tensor::SymmetricTensor,values,indices,i,j)
-  ((i,j) == indices) | ((j,i) == indices) && return values
-  if (i,j) in indices
-    ind = findfirst(indices .== Ref((i,j)))
-    return values[only(ind)]
-  elseif (j,i) in indices
-    ind = findfirst(indices .== Ref((j,i)))
-    return values[only(ind)]
+  # fill first values
+  σᵒᵢⱼ_i, σⁱᵢⱼ_i, ϵᵒᵢⱼ_i, ϵⁱᵢⱼ_i = initialize_state_var_D(r,p,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
+  Ttensors = eltype(σᵒᵢⱼ_i)
+
+  # initialize containers
+  t_vec = Float64[tspan[1]]
+  S_vec = Float64[S_i]
+  σⁱᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[σⁱᵢⱼ_i]
+  σᵒᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[σᵒᵢⱼ_i]
+  ϵⁱᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[ϵⁱᵢⱼ_i]
+  Dⁱ_vec = Float64[Dⁱ]
+  Dᵒ_vec = Float64[Dᵒ]
+
+  # initialize values
+  tsim::Float64 = tspan[1]
+  Snext::Float64 = S_i
+  σⁱᵢⱼnext::typeof(σⁱᵢⱼ_i) = σⁱᵢⱼ_i
+  σᵒᵢⱼnext::typeof(σᵒᵢⱼ_i) = σᵒᵢⱼ_i
+  ϵⁱᵢⱼnext::typeof(ϵⁱᵢⱼ_i) = ϵⁱᵢⱼ_i
+  Dⁱnext::Float64 = Dⁱ
+  Dᵒnext::Float64 = Dᵒ
+  Δt_next::Float64 = Δt
+  Δt_used::Float64 = Δt
+
+  last_tsim_printed = 0.0
+  last_tsim_saved = 0.0
+  bifurcation_flag = (Dⁱ==Dᵒ) ? false : true
+  i = 1 # iter counter
+  while tsim < tspan[2]
+    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
+    print_flag && print_time_iteration(i,tsim)
+
+    # solving procedure depends on the sign of S derivative
+    if bifurcation_flag
+      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
+    else
+      σⁱᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Δt_used, Δt_next = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
+      σᵒᵢⱼnext = σⁱᵢⱼnext
+      Dᵒnext = Dⁱnext
+      σᵒᵢⱼnext_principal = principal_coords(σᵒᵢⱼnext,θ)
+      Snext = σᵒᵢⱼnext_principal[1,1]/σᵒᵢⱼnext_principal[2,2]
+    end
+
+    if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
+      if Snext-S_vec[end] <= 0
+        bifurcation_flag = true
+        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
+      end
+    end
+    tsim += Δt_used
+
+    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
+    if save_flag
+      push!(S_vec,Snext)
+      push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
+      push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
+      push!(ϵⁱᵢⱼ_vec,ϵⁱᵢⱼnext)
+      push!(Dⁱ_vec,Dⁱnext)
+      push!(Dᵒ_vec,Dᵒnext)
+      push!(t_vec,tsim)
+    end
+
+    i += 1
+
+    # break loop under conditions 
+    if !isnothing(time_maxiter)
+      (length(t_vec)==time_maxiter+1) && break
+    end
+    D_max = 0.999
+    (Dⁱnext > D_max) && (@info("Dⁱ reached $D_max, ending simulation") ; break)
+    (Dᵒnext > D_max) && (@info("Dᵒ reached $D_max, ending simulation") ; break)
+  end
+  return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
+end   
+
+function initialize_state_var_D(r,p,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
+  ps = p.solver
+  # get outside state to be used as reference
+  σᵒᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,Dᵒ ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
+  ϵᵒᵢⱼ_i_principal = compute_ϵij(r,Dᵒ,σᵒᵢⱼ_i_principal)
+  σᵒᵢⱼ_i = band_coords(σᵒᵢⱼ_i_principal,θ)
+  ϵᵒᵢⱼ_i = band_coords(ϵᵒᵢⱼ_i_principal,θ)
+
+  σⁱᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,Dⁱ ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
+  ϵⁱᵢⱼ_i_principal = compute_ϵij(r,Dⁱ,σⁱᵢⱼ_i_principal)
+  σⁱᵢⱼ_i = band_coords(σⁱᵢⱼ_i_principal,θ)
+  ϵⁱᵢⱼ_i = band_coords(ϵⁱᵢⱼ_i_principal,θ)
+  
+  # insert stress and strain componant constrained by stress continuity and strain compatibility
+  σⁱᵢⱼ_guess = insert_into(σⁱᵢⱼ_i, (σⁱᵢⱼ_i[2,2],σⁱᵢⱼ_i[1,2]), ((2,2),(1,2)))
+  ϵⁱᵢⱼ_guess = insert_into(ϵⁱᵢⱼ_i, ϵᵒᵢⱼ_i[1,1], (1,1))
+
+  # initialize first guess for u = [ σξξ, σoop, ϵηη, ϵξη ]
+  u = Vec(σⁱᵢⱼ_i[1,1], σⁱᵢⱼ_i[3,3], ϵⁱᵢⱼ_i[2,2], ϵⁱᵢⱼ_i[1,2])
+  result = DiffResults.JacobianResult(u)
+
+  for i in 1:ps.newton_maxiter
+    # get residual and its gradient with respect to u
+    ForwardDiff.jacobian!(result, u -> residual_initialize(r,Dⁱ,ϵⁱᵢⱼ_guess,σⁱᵢⱼ_guess,u), u)
+    ∇res = DiffResults.jacobian(result)
+    res  = DiffResults.value(result)
+
+    # update u with Newton algo
+    δu = - ∇res\res
+    u = u + δu
+    #@debug "δu = $δu"
+    #@debug "typeof(u) = $(typeof(u))"
+
+    (norm(res) <= ps.newton_abstol) && break
+    
+    (i == ps.newton_maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+  end
+  σξξ, σoop, ϵηη, ϵξη = u
+  σⁱᵢⱼ = insert_into(σⁱᵢⱼ_guess, (σξξ, σoop), ((1,1),(3,3))) 
+  ϵⁱᵢⱼ = insert_into(ϵⁱᵢⱼ_guess, (ϵηη,ϵξη), ((2,2),(1,2))) 
+  if coords == :principal 
+    σᵒᵢⱼ = σᵒᵢⱼ_i_principal
+    ϵᵒᵢⱼ = ϵᵒᵢⱼ_i_principal
+    σⁱᵢⱼ = principal_coords(σⁱᵢⱼ,θ)
+    ϵⁱᵢⱼ = principal_coords(ϵⁱᵢⱼ,θ)
+  elseif coords == :band
+    σᵒᵢⱼ = σᵒᵢⱼ_i
+    ϵᵒᵢⱼ = ϵᵒᵢⱼ_i
   else
-    return tensor[i,j]
+    @error "`coords` keyword argument $coords is not recognized. Use `:principal` or `:band` instead, `:band` being the default"
   end
+  return σᵒᵢⱼ, σⁱᵢⱼ, ϵᵒᵢⱼ, ϵⁱᵢⱼ
 end
 
-function get_print_flag(p,iter,tsim,last_tsim_printed)
-  if (iter==1) | print_flag_condition(p,iter,tsim,last_tsim_printed)
-    print_flag = true
-    last_tsim_printed = tsim
-  else 
-    print_flag = false
+function residual_initialize(r,Dⁱ,ϵⁱᵢⱼ_guess,σⁱᵢⱼ_guess,u)
+  σξξ, σoop, ϵηη, ϵξη = u
+  σⁱᵢⱼ = insert_into(σⁱᵢⱼ_guess, (σξξ, σoop), ((1,1),(3,3))) 
+  ϵⁱᵢⱼ = insert_into(ϵⁱᵢⱼ_guess, (ϵηη,ϵξη), ((2,2),(1,2))) 
+  ϵⁱᵢⱼ_analytical = compute_ϵij(r,Dⁱ,σⁱᵢⱼ)
+  Δϵⁱᵢⱼ = ϵⁱᵢⱼ_analytical - ϵⁱᵢⱼ
+  res = Vec(Δϵⁱᵢⱼ[1,1], Δϵⁱᵢⱼ[2,2], Δϵⁱᵢⱼ[3,3], Δϵⁱᵢⱼ[1,2])
+  return res
+end
+function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan)
+  #unpack
+  time_maxiter = p.solver.time_maxiter
+
+  # fill first values
+  σᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
+  ϵᵢⱼ_i_principal = compute_ϵij(r,D_i,σᵢⱼ_i_principal)
+  σᵢⱼ_i = band_coords(σᵢⱼ_i_principal,θ)
+  ϵᵢⱼ_i = band_coords(ϵᵢⱼ_i_principal,θ)
+
+  # initialize containers
+  t_vec = Float64[tspan[1]]
+  S_vec = Float64[S_i]
+  σⁱᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+  σᵒᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+  ϵⁱᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
+  Dⁱ_vec = Float64[D_i]
+  Dᵒ_vec = Float64[D_i]
+
+  # initialize values
+  tsim::Float64 = tspan[1]
+  Snext::Float64 = S_i
+  σⁱᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+  σᵒᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+  ϵⁱᵢⱼnext::typeof(ϵᵢⱼ_i) = ϵᵢⱼ_i
+  Dⁱnext::Float64 = D_i
+  Dᵒnext::Float64 = D_i
+  Δt_next::Float64 = Δt
+  Δt_used::Float64 = Δt
+
+  last_tsim_printed = 0.0
+  last_tsim_saved = 0.0 
+  bifurcation_flag = false
+  i = 1 # iter counter
+  while tsim < tspan[2]
+    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
+    print_flag && print_time_iteration(i,tsim)
+
+    # solving procedure depends on the sign of S derivative
+    if bifurcation_flag
+      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
+      Dᵒnext = Dᵒ_vec[end] # we want to force damage out constant
+    else
+      σⁱᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Δt_used, Δt_next = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
+      σᵒᵢⱼnext = σⁱᵢⱼnext
+      Dᵒnext = Dⁱnext
+      σᵒᵢⱼnext_principal = principal_coords(σᵒᵢⱼnext,θ)
+      Snext = σᵒᵢⱼnext_principal[1,1]/σᵒᵢⱼnext_principal[2,2]
+    end
+
+    if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
+      if Snext-S_vec[end] <= 0
+        bifurcation_flag = true
+        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
+        Dᵒnext = Dᵒ_vec[end] # we want to force damage out constant
+      end
+    end
+    tsim += Δt_used
+
+    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
+    if save_flag
+      push!(S_vec,Snext)
+      push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
+      push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
+      push!(ϵⁱᵢⱼ_vec,ϵⁱᵢⱼnext)
+      push!(Dⁱ_vec,Dⁱnext)
+      push!(Dᵒ_vec,Dᵒnext)
+      push!(t_vec,tsim)
+    end
+
+    i += 1
+
+    # break loop under conditions 
+    if !isnothing(time_maxiter)
+      (length(t_vec)==time_maxiter+1) && break
+    end
+    (Dⁱnext > 0.999) && break
   end
-  return print_flag, last_tsim_printed
+  return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
 end
 
-function get_save_flag(p,iter,tsim,last_tsim_saved)
-  if (iter==1) | save_flag_condition(p,iter,tsim,last_tsim_saved)
-    save_flag = true
-    last_tsim_saved = tsim
-  else 
-    save_flag = false
+function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan)
+
+  #initialize vectors
+  t_vec = tspan[1]:Δt:tspan[2]
+  σⁱᵢⱼ_vec = Vector{SymmetricTensor{2,3}}(undef,length(t_vec))
+  σᵒᵢⱼ_vec = Vector{SymmetricTensor{2,3}}(undef,length(t_vec))
+  ϵⁱᵢⱼ_vec = similar(σⁱᵢⱼ_vec)
+  Dⁱ_vec = Vector{Float64}(undef,length(t_vec))
+  Dᵒ_vec = Vector{Float64}(undef,length(t_vec))
+  S_vec = Vector{Float64}(undef,length(t_vec))
+  
+  # fill first values
+  σᵢⱼ_i = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
+  ϵᵢⱼ_i = compute_ϵij(r,D_i,σᵢⱼ_i)
+
+  σⁱᵢⱼ_vec[begin] = band_coords(σᵢⱼ_i,θ)
+  σᵒᵢⱼ_vec[begin] = band_coords(σᵢⱼ_i,θ)
+  ϵⁱᵢⱼ_vec[begin] = band_coords(ϵᵢⱼ_i,θ) # test that stress-strain relation is still valid after rotation !! 
+  Dⁱ_vec[begin] = D_i
+  Dᵒ_vec[begin] = D_i
+  S_vec[begin] = S_i
+  last_tsim_printed = 0.0
+
+  # bifurcation flag :
+  bifurcation_flag = false
+  last_iter = 0
+  for i in 2:length(t_vec)
+    print_flag, last_tsim_printed = get_print_flag(p,i,t_vec[i-1],last_tsim_printed)
+    print_flag && print_time_iteration(i,t_vec[i-1])
+
+    # solving procedure depends on the sign of S derivative
+    if bifurcation_flag
+      S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt)
+      Dᵒ_vec[i] = Dᵒ_vec[i-1] # we want to force damage out constant 
+    else
+      σⁱᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], _ = solve_1_point(r,p,σⁱᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dⁱ_vec[i-1],ϵ̇11,θ,Δt)
+      σᵒᵢⱼ_vec[i] = σⁱᵢⱼ_vec[i]
+      Dᵒ_vec[i] = Dⁱ_vec[i]
+      σᵒᵢⱼ_principal = principal_coords(σᵒᵢⱼ_vec[i],θ)
+      S_vec[i] = σᵒᵢⱼ_principal[1,1]/σᵒᵢⱼ_principal[2,2]
+    end
+
+    if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
+      (S_vec[i]-S_vec[i-1] <= 0) && (bifurcation_flag = true)
+      if bifurcation_flag
+        S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt)
+        Dᵒ_vec[i] = Dᵒ_vec[i-1] # we want to force damage out constant 
+      end
+    end
+    if Dⁱ_vec[i] > 0.999
+      last_iter = i
+      break
+    end
   end
-  return save_flag, last_tsim_saved
+  li = last_iter
+  return t_vec[1:li], S_vec[1:li], σⁱᵢⱼ_vec[1:li], σᵒᵢⱼ_vec[1:li], ϵⁱᵢⱼ_vec[1:li], Dⁱ_vec[1:li], Dᵒ_vec[1:li]
 end
 
-print_flag_condition(p::Params{TF,Nothing},iter,tsim,last_tsim) where {TF<:Real} = ( (tsim-last_tsim) >= (1/p.output.print_frequency) )
-print_flag_condition(p::Params{Nothing,TP},iter,tsim,last_tsim) where {TP<:Real} = (iter%p.output.print_period == 0)
-function print_flag_condition(p::Params{TF,TP},iter,tsim,last_tsim) where {TF<:Real,TP<:Real}
-  return ( (tsim-last_tsim) >= (1/p.output.print_frequency) ) || (iter%p.output.print_period == 0)
+function adaptative_solve_1_point(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ,Δt)
+  e₀ = p.solver.e₀
+
+  σᵢⱼnext1, ϵᵢⱼnext1, Dnext1, u1 = solve_1_point(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ,Δt)
+  σᵢⱼmid, ϵᵢⱼmid, Dmid, umid = solve_1_point(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ,Δt/2)
+  σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, u2 = solve_1_point(r,p,σᵢⱼmid,ϵᵢⱼmid,Dmid,ϵ̇11,θ,Δt/2)
+
+  # compute errors for each unknowns physical quantity and ponderate 
+  eD = Dnext2-Dnext1
+  eσ = norm((u2-u1)[1:2])
+  eϵ = norm((u2-u1)[3])
+  if e₀ isa Real
+    e₀ref = e₀
+    e_normalized = (eD, eσ/r.G, eϵ)
+    ok_flag = all(e_normalized.<e₀)
+    e = maximum(e_normalized)
+  elseif e₀ isa NamedTuple
+    e₀ref = e₀.D
+    ok_flag = (eD<e₀.D) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
+    e_normalized = (eD, eσ*(e₀ref/e₀.σ), eϵ*(e₀ref/e₀.ϵ))
+    e,ind = findmax(e_normalized)
+    ok_flag || @debug("maximum error comes from indice $(ind) of (D,σ,ϵ)")
+  end
+
+  if ok_flag
+    # increse timestep
+    Δt_next = min(Δt*abs(e₀ref/e),Δt*2)
+    # keep best solution
+    return σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, Δt, Δt_next
+  else
+    # recursively run with decreased timestep
+    adaptative_solve_1_point(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ,Δt*abs(e₀ref/e)) 
+    #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
+  end
+
 end
 
-save_flag_condition(p::Params{T1,T2,TF,Nothing},iter,tsim,last_tsim) where {T1,T2,TF<:Real} = ( (tsim-last_tsim) >= (1/p.output.save_frequency) )
-save_flag_condition(p::Params{T1,T2,Nothing,TP},iter,tsim,last_tsim) where {T1,T2,TP<:Real} = (iter%p.output.save_period == 0)
-function save_flag_condition(p::Params{T1,T2,TF,TP},iter,tsim,last_tsim) where {T1,T2,TF<:Real,TP<:Real}
-  return ( (tsim-last_tsim) >= (1/p.output.save_frequency) ) || (iter%p.output.save_period == 0)
+function solve_1_point(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ,Δt) 
+  # this function is similar to solve but takes and returns tensor in the shear band coordinates instead of the principal stresses coordinates
+  ps = p.solver
+  D = D_i
+
+  ϵᵢⱼ_i = principal_coords(ϵᵢⱼ_i,θ)
+  σᵢⱼ_i = principal_coords(σᵢⱼ_i,θ)
+  #println(eps()*norm(σᵢⱼ_i))
+  @assert isapprox(σᵢⱼ_i[1,2],0.0,atol=1e-12*norm(σᵢⱼ_i)) # put this in tests at some point
+
+  # get first guess of the unknowns with an elastic solve
+  ϵᵢⱼnext = insert_into(ϵᵢⱼ_i, (ϵᵢⱼ_i[1,1] + ϵ̇11*Δt), (1,1))
+  σᵢⱼnext = σᵢⱼ_i#σᵢⱼnext = compute_σij(r,D,ϵᵢⱼnext)
+  #σᵢⱼnext = insert_into(σᵢⱼnext, -1e6, (2,2))
+  u = Vec(σᵢⱼnext[1,1], σᵢⱼnext[3,3], ϵᵢⱼnext[2,2])
+  #@debug "u_i = $u"
+  for i in 1:ps.newton_maxiter
+    # get residual and its gradient with respect to u
+    ∇res , res = Tensors.gradient(u -> residual(r,D,ϵᵢⱼ_i,ϵᵢⱼnext,σᵢⱼ_i,σᵢⱼnext,Δt,u), u, :all)
+    #@debug "norm res = $(norm(res))"
+    #@debug "∇res = $∇res"
+
+    # update u with Newton algo
+    δu = - ∇res\res
+    u = u + δu
+    #@debug "δu = $δu"
+    #@debug "typeof(u) = $(typeof(u))"
+
+    (norm(res) <= ps.newton_abstol) && break
+    
+    (i == ps.newton_maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+  end
+  # update ϵᵢⱼnext and σᵢⱼnext with converged u
+  ϵᵢⱼnext = insert_into(ϵᵢⱼnext, u[3], (2,2)) 
+  σᵢⱼnext = insert_into(σᵢⱼnext, (u[1], u[2]), ((1,1),(3,3)))
+  #_ , Ḋ = compute_ϵ̇ij(r,D,σᵢⱼ_i,σᵢⱼnext,Δt) # replaced by two next lines
+  KI = compute_KI(r,(σᵢⱼnext+σᵢⱼ_i)/2,D)
+  Ḋ = compute_subcrit_damage_rate(r,KI,D)
+  Dnext = D + Ḋ*Δt
+  return band_coords(σᵢⱼnext,θ), band_coords(ϵᵢⱼnext,θ), Dnext, u
 end
 
-print_time_iteration(iter,tsim) = print("------","\n","time iteration $iter : $tsim","\n","------")
+function adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt)
+  e₀ = p.solver.e₀
+  
+  Snext1, σⁱᵢⱼnext1, σᵒᵢⱼnext1, ϵⁱᵢⱼnext1, Dⁱnext1, Dᵒnext1, u1 = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt)
+  Smid, σⁱᵢⱼmid, σᵒᵢⱼmid, ϵⁱᵢⱼmid, Dⁱmid, Dᵒmid, umid = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt/2)
+  Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, u2 = solve_2_points(r,p,Smid,σ₃,σⁱᵢⱼmid,σᵒᵢⱼmid,ϵⁱᵢⱼmid,Dᵒ,Dⁱmid,ϵ̇ⁱξη,θ,Δt/2)
+
+  # compute errors for each unknowns physical quantity and ponderate 
+  eD = max(Dⁱnext2-Dⁱnext1,Dᵒnext2-Dᵒnext1)
+  eS = abs(Snext2-Snext1)
+  eσ = norm((u2-u1)[2:3])
+  eϵ = norm((u2-u1)[4])
+  if e₀ isa Real
+    e₀ref = e₀
+    e_normalized = (eD, eS, eσ/r.G, eϵ) # todo better
+    ok_flag = all(e_normalized.<e₀)
+    e = maximum(e_normalized)
+  elseif e₀ isa NamedTuple
+    e₀ref = e₀.D
+    ok_flag = (eD<e₀.D) && (eS<e₀.S) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
+    e_normalized = (eD, eS*(e₀ref/e₀.S), eσ*(e₀ref/e₀.σ), eϵ*(e₀ref/e₀.ϵ))
+    emax,ind = findmax(e_normalized)
+    ok_flag || @debug("maximum error comes from indice $(ind) of (D,S,σ,ϵ)")
+  end
+
+  if ok_flag
+    # increse timestep
+    Δt_next::Float64 = min(Δt*abs(e₀ref/emax),Δt*2)
+    # keep best solution
+    return Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, Δt, Δt_next
+  else
+    # recursively run with decreased timestep
+    factor::Float64 = abs(e₀ref/emax)
+    adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ, Δt*factor) 
+    #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
+  end
+
+end
+
+function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt)
+  ps = p.solver
+  # get first guess of the unknowns with an elastic solve
+  u = Vec(S, σⁱᵢⱼ[1,1], σⁱᵢⱼ[3,3], ϵⁱᵢⱼ[2,2]) # Snext, σⁱξξnext, σⁱoopnext, ϵⁱηηnext
+  #@debug "u_i = $u"
+  for i in 1:ps.newton_maxiter
+    # get residual and its gradient with respect to u
+    #∇res , res = Tensors.gradient(u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,u), u, :all)
+    result = DiffResults.JacobianResult(u)
+    ForwardDiff.jacobian!(result, u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u), u)
+    ∇res = DiffResults.jacobian(result)
+    res  = DiffResults.value(result)
+
+    # update u with Newton algo
+    δu = - ∇res\res
+    u = u + δu
+    #@debug "δu = $δu"
+    #@debug "typeof(u) = $(typeof(u))"
+
+    (norm(res) <= ps.newton_abstol) && break
+    
+    (i == ps.newton_maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+  end
+  # update strains and stresses with converged u
+  Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ = compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
+  Snext = S + Ṡ*Δt
+  σᵒᵢⱼnext = σᵒᵢⱼ + σ̇ᵒᵢⱼ*Δt
+  σⁱᵢⱼnext = σⁱᵢⱼ + σ̇ⁱᵢⱼ*Δt
+  ϵⁱᵢⱼnext = ϵⁱᵢⱼ + ϵ̇ⁱᵢⱼ*Δt
+  
+  KIᵒ = compute_KI(r,(σᵒᵢⱼnext+σᵒᵢⱼ)/2,Dᵒ)
+  KIⁱ = compute_KI(r,(σⁱᵢⱼnext+σⁱᵢⱼ)/2,Dⁱ) # compute KI at intermediate stress : TO TEST.
+  Ḋᵒ = compute_subcrit_damage_rate(r,KIᵒ,Dᵒ)
+  Ḋⁱ = compute_subcrit_damage_rate(r,KIⁱ,Dⁱ)
+  #_ , Ḋⁱ2 = compute_ϵ̇ij(r,Dⁱ,σⁱᵢⱼ,σⁱᵢⱼnext,Δt) # compute damage growth inside the shear band
+  #@assert Ḋⁱ == Ḋⁱ2 # shouldn't error out, then remove preceeding line
+  Dᵒnext = Dᵒ + Ḋᵒ*Δt
+  Dⁱnext = Dⁱ + Ḋⁱ*Δt
+  return Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, u
+end
+
+function residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
+  
+  Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ = compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
+  σⁱᵢⱼnext = σⁱᵢⱼ + σ̇ⁱᵢⱼ*Δt
+
+  ϵ̇ⁱᵢⱼ_analytical, _ = compute_ϵ̇ij(r,Dⁱ,σⁱᵢⱼ,σⁱᵢⱼnext,Δt ; damaged_allowed=true)
+  Δϵ̇ⁱᵢⱼ = ϵ̇ⁱᵢⱼ_analytical - ϵ̇ⁱᵢⱼ
+  res = Vec(Δϵ̇ⁱᵢⱼ[1,1], Δϵ̇ⁱᵢⱼ[2,2], Δϵ̇ⁱᵢⱼ[3,3], Δϵ̇ⁱᵢⱼ[1,2])
+  return res
+end
+
+function compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
+  Snext, σⁱξξnext, σⁱoopnext, ϵⁱηηnext = u
+  σⁱξξ = σⁱᵢⱼ[1,1]
+  σⁱoop = σⁱᵢⱼ[3,3]
+  ϵⁱηη = ϵⁱᵢⱼ[2,2]
+  ϵⁱξη = ϵⁱᵢⱼ[1,2]
+  Ṡ = (Snext - S) / Δt
+  ϵⁱξηnext = ϵⁱξη + ϵ̇ⁱξη*Δt
+
+  σ̇ᵒᵢⱼ = compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,σᵒᵢⱼ,Dᵒ,Δt,θ ; damaged_allowed=false) # no damage outside the band
+  σ̇ⁱᵢⱼ = get_σ̇ⁱij_from_primitive_vars(σ̇ᵒᵢⱼ,σⁱξξ,σⁱoop,σⁱξξnext,σⁱoopnext,Δt)
+  #σ̇ⁱᵢⱼ = set_plane_strain_oop_stress_rate(σⁱᵢⱼ,σ̇ⁱᵢⱼ,r,Dⁱ,Δt ; damaged_allowed=true)
+  ϵ̇ⁱᵢⱼ = get_ϵ̇ⁱᵢⱼ_from_primitive_vars(r,σᵒᵢⱼ,σ̇ᵒᵢⱼ,ϵⁱηη,ϵⁱξη,Dⁱ,ϵⁱηηnext,ϵⁱξηnext,Δt)
+  return Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ
+end
+
+function get_σ̇ⁱij_from_primitive_vars(σ̇ᵒᵢⱼ_band,σⁱξξ,σⁱoop,σⁱξξnext,σⁱoopnext,Δt)
+  σ̇ⁱξξ = (σⁱξξnext - σⁱξξ)/Δt
+  σ̇ⁱoop = (σⁱoopnext - σⁱoop)/Δt
+  σ̇ⁱij_band = SymmetricTensor{2,3}([    σ̇ⁱξξ       σ̇ᵒᵢⱼ_band[1,2]     0    ;
+                                    σ̇ᵒᵢⱼ_band[2,1] σ̇ᵒᵢⱼ_band[2,2]     0    ;
+                                         0              0          σ̇ⁱoop   ])
+  return σ̇ⁱij_band
+end
+
+function get_ϵ̇ⁱᵢⱼ_from_primitive_vars(r,σᵒᵢⱼ,σ̇ᵒᵢⱼ,ϵⁱηη,ϵⁱξη,D,ϵⁱηηnext,ϵⁱξηnext,Δt)
+  σᵒᵢⱼnext = σᵒᵢⱼ + σ̇ᵒᵢⱼ*Δt
+  ϵ̇ⁱηη = (ϵⁱηηnext - ϵⁱηη) /Δt
+  ϵ̇ⁱξη = (ϵⁱξηnext - ϵⁱξη) /Δt
+  ϵ̇ᵒᵢⱼ, _ = compute_ϵ̇ij(r,D,σᵒᵢⱼ,σᵒᵢⱼnext,Δt ; damaged_allowed=false) # no damage outside the band
+  ϵ̇ⁱᵢⱼ = SymmetricTensor{2,3}([ ϵ̇ᵒᵢⱼ[1,1]   ϵ̇ⁱξη   0  ;
+                                  ϵ̇ⁱξη      ϵ̇ⁱηη   0  ;
+                                   0         0     0  ]) # ϵ̇ᵒᵢⱼ[3,3] put zero on last term if needed to force plain strain
+  return ϵ̇ⁱᵢⱼ
+end
+
+function compute_rotated_stress_rate_from_principal_coords(r,Ṡ,σ₃,σᵢⱼ_principal,D,Δt,θ ; damaged_allowed=true)
+  σ̇ᵢⱼ_principal = SymmetricTensor{2,3}([Ṡ*σ₃ 0 0 ; 0 0 0 ; 0 0 r.ν*Ṡ*σ₃])
+  σ̇ᵢⱼ_principal = set_plane_strain_oop_stress_rate(σᵢⱼ_principal,σ̇ᵢⱼ_principal,r,D,Δt ; abstol=1e-16, damaged_allowed)
+  σ̇ᵢⱼ_band = band_coords(σ̇ᵢⱼ_principal,θ)
+  return σ̇ᵢⱼ_band
+end
+function compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,σᵢⱼ_band,D,Δt,θ; damaged_allowed=true)
+  σ̇ᵢⱼ_band = compute_rotated_stress_rate_guess(r,Ṡ,σ₃,θ)
+  σ̇ᵢⱼ_band = set_plane_strain_oop_stress_rate(σᵢⱼ_band,σ̇ᵢⱼ_band,r,D,Δt ; abstol=1e-16, damaged_allowed)
+  return σ̇ᵢⱼ_band
+end
+
+function compute_rotated_stress_rate_guess(r,Ṡ,σ₃,θ)
+  σ̇ᵢⱼ_principal = SymmetricTensor{2,3}([Ṡ*σ₃ 0 0 ; 0 0 0 ; 0 0 r.ν*Ṡ*σ₃])
+  σ̇ᵢⱼ_band = band_coords(σ̇ᵢⱼ_principal,θ)
+  return σ̇ᵢⱼ_band
+end
+
+function get_stress_deviation_from_far_field(σᵢⱼ ; offdiagtol=1e-5, compression_axis=:x)
+  σᵢⱼ = filter_offdiagonal(σᵢⱼ ; tol=offdiagtol)
+  F = eigen(σᵢⱼ[1:2,1:2])
+  #any(isnan.([F.values F.vectors])) && (F = eigen(Array(σᵢⱼ)))
+  ind = findall(==(minimum(F.values)),F.values)
+  σ₁_xy_direction = length(ind) == 1 ? F.vectors[:,ind] : Vec(1.0,0.0)
+  σ₁_far_field_direction = (compression_axis==:x) ? Vec(1.0,0.0) : Vec(0.0,1.0)
+  if all(σ₁_xy_direction .≈ σ₁_far_field_direction)
+      angle = 0.0
+    else
+      angle = atand(σ₁_xy_direction[2],σ₁_xy_direction[1])
+  end
+  #(angle == 90) && (angle = zero(angle))
+  (angle > 90) && (angle -= 180)
+  (angle < -90) && (angle += 180)
+  return angle
+end
+
+function filter_offdiagonal(σᵢⱼ ; tol = 1e-5)
+  (abs(σᵢⱼ[1,2]) <= tol) && (σᵢⱼ = insert_into(σᵢⱼ, 0.0, (1,2)))
+  return σᵢⱼ
+end

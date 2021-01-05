@@ -1,7 +1,8 @@
 
-@time using DamagedShearBand ; const DSB = DamagedShearBand
-using Plots # add Plots before using it
-pyplot(size=(1000,400)) # slow but interactive backend for Plots, add PlotlyJS package first
+@time using DamagedShearBand
+const DSB = DamagedShearBand
+#using Plots # add Plots before using it
+#pyplot(size=(1000,400)) # slow but interactive backend for Plots, add PlotlyJS package first
 
 # imposed values
 ϵ̇₁₁ = -1e-6

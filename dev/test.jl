@@ -1,5 +1,5 @@
 @time (using DamagedShearBand ; const DSB = DamagedShearBand)
-ENV["JULIA_DEBUG"] = DamagedShearBand
+#ENV["JULIA_DEBUG"] = DamagedShearBand
 
 
 # σ₃ = -1e6
@@ -8,7 +8,7 @@ ENV["JULIA_DEBUG"] = DamagedShearBand
 # Sc = get_damage_onset(r,σ₃,D)
 # σᵢⱼ = DSB.build_principal_stress_tensor(r,5,σ₃,Dc)
 
-# σᵢⱼ_r = DSB.change_coords(σᵢⱼ,θ)
+# σᵢⱼ_r = DSB.band_coords(σᵢⱼ,θ)
 
 # Dc = DSB.get_KI_mininizer_D(r)
 # σᵢⱼ_Dc = DSB.build_principal_stress_tensor(r,100,σ₃,Dc)
@@ -53,8 +53,8 @@ ENV["JULIA_DEBUG"] = DamagedShearBand
 # # build stress tensors and rotate them in the band coordinates system
 # σᵢⱼ_in = DSB.build_principal_stress_tensor(r,S,σ₃,D_in_i)
 # σᵢⱼ_out = DSB.build_principal_stress_tensor(r,S,σ₃,D_out_i)
-# σᵢⱼ_in_ξη = DSB.change_coords(σᵢⱼ_in,θ)
-# σᵢⱼ_out_ξη = DSB.change_coords(σᵢⱼ_out,θ)
+# σᵢⱼ_in_ξη = DSB.band_coords(σᵢⱼ_in,θ)
+# σᵢⱼ_out_ξη = DSB.band_coords(σᵢⱼ_out,θ)
 # # get strains
 # ϵᵢⱼ_in_ξη = DSB.compute_ϵij(r,D_in_i,σᵢⱼ_in_ξη)
 # ϵᵢⱼ_out_ξη = DSB.compute_ϵij(r,D_out_i,σᵢⱼ_out_ξη)
@@ -66,9 +66,9 @@ ENV["JULIA_DEBUG"] = DamagedShearBand
 # Δt = 1
 # Ṡ = 1e-6
 # σᵢⱼ_in_next = DSB.build_principal_stress_tensor(r,S+Ṡ*Δt,σ₃,D_in_i)
-# Δσ = DSB.change_coords(σᵢⱼ_in_next,θ) - σᵢⱼ_in_ξη 
+# Δσ = DSB.band_coords(σᵢⱼ_in_next,θ) - σᵢⱼ_in_ξη 
 
-# ϵᵢⱼ_in_ξη_next = DSB.compute_ϵij(r,D_in_i,DSB.change_coords(σᵢⱼ_in_next,θ))
+# ϵᵢⱼ_in_ξη_next = DSB.compute_ϵij(r,D_in_i,DSB.band_coords(σᵢⱼ_in_next,θ))
 # Δϵ = ϵᵢⱼ_in_ξη_next - ϵᵢⱼ_in_ξη
 
 # #C = DSB.compute_damaged_stiffness_tensor(r,(ϵᵢⱼ_in_ξη_next+ϵᵢⱼ_in_ξη)/2,D_in_i)
@@ -202,3 +202,35 @@ end
 test_func(1,2,3) 
 nt = (a=1,b=2)
 @time isdefined(nt,:a)
+
+#unpack
+time_maxiter = p.solver.time_maxiter
+
+# fill first values
+σᵒᵢⱼ_i, σⁱᵢⱼ_i, ϵᵒᵢⱼ_i, ϵⁱᵢⱼ_i = DSB.initialize_state_var_D(r,p,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
+Ttensors = eltype(σᵒᵢⱼ_i)
+
+# initialize containers
+t_vec = Float64[tspan[1]]
+S_vec = Float64[S_i]
+σⁱᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[σⁱᵢⱼ_i]
+σᵒᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[σᵒᵢⱼ_i]
+ϵⁱᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[ϵⁱᵢⱼ_i]
+Dⁱ_vec = Float64[Dⁱ]
+Dᵒ_vec = Float64[Dᵒ]
+
+# initialize values
+tsim = tspan[1]
+Snext = S_i
+σⁱᵢⱼnext = σⁱᵢⱼ_i
+σᵒᵢⱼnext = σᵒᵢⱼ_i
+ϵⁱᵢⱼnext = ϵⁱᵢⱼ_i
+Dⁱnext = Dⁱ
+Dᵒnext = Dᵒ
+Δt_next = Δt
+Δt_used = Δt
+
+last_tsim_printed = 0.0
+last_tsim_saved = 0.0
+bifurcation_flag = (Dⁱ==Dᵒ) ? false : true
+i = 1 # iter counter

@@ -1,7 +1,3 @@
-δ(i,j) = i == j ? 1.0 : 0.0
-Isym_func(i,j,k,l) = 0.5*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k))
-Isymdev_func(i,j,k,l) = 0.5*(δ(i,k)*δ(j,l) + δ(i,l)*δ(j,k)) - 1.0/3.0*δ(i,j)*δ(k,l)
-
 E_from_Gν(G,ν) = 2G*(1 + ν)
 λ_from_Gν(G,ν) = 2G*ν / (1 - 2ν)
 
@@ -81,7 +77,13 @@ function compute_b2(r::Rheology,A1,Γ)
   return (1/Γ)*(A1^2/2 + (3*(1-2r.ν))/(2*(1+r.ν)))
 end
 
-get_τ(s) = sqrt(0.5 * s ⊡ s)
+function get_τ(tensor::AbstractTensor ; input=:s)
+  (input == :s) && (return sqrt(0.5 * tensor ⊡ tensor))
+  if input == :σ
+    s = dev(tensor)
+    return sqrt(0.5 * s ⊡ s)
+  end
+end
 
 function compute_KI(r::Rheology,σ,τ,A,B)
   return (A*σ + B*τ) * sqrt(π*r.a)
@@ -296,78 +298,6 @@ function compute_ϵij(r,A1,B1,σᵢⱼ)
 end
 compute_ϵij(r,D,σᵢⱼ) = D==0 ? compute_ϵij(r,0.0,0.0,σᵢⱼ) : compute_ϵij(r,compute_A1B1(r,D)...,σᵢⱼ)
 
-function state_system!(du,u,p,t)
-  D, ϵ, γ, σ, τ = u
-  r, dϵdt, dγdt = p
-
-  # damage constants
-  (D < r.D₀) && (println("D = ",D); @warn "D < D0, something went wrong")
-  (D == r.D₀) && (D += 1e-9) # insure D > D0 to prevent singularity
-  isnan(D) && println("D is NaN")
-
-  c1, c2, c3 = compute_c1c2c3(r,D)
-  A, B = compute_AB(r,c1,c2,c3)
-
-  # TODO : Check KI sign to avoid unnecessary calculations
-
-  A1 = compute_A1(r,A)
-  B1 = compute_B1(r,B)
-  Γ = compute_Γ(r,A1,B1)
-  a1 = compute_a1(B1,Γ)
-  b1 = compute_b1(A1,B1,Γ)
-  b2 = compute_b2(r,A1,Γ)
-
-  # derivatives
-  # D
-  dDdt = compute_subcrit_damage_rate(r, σ, τ, D)
-  #println("D = ", D)
-  #println("dDdt = ", dDdt, "\n")
-
-  # c1, c2, c3
-  dc1dt = compute_dc1dD(r,D) * dDdt
-  dc2dt = compute_dc2dD(r,D) * dDdt
-  dc3dt = compute_dc3dD(r,D) * dDdt
-
-  # println("dDdt : ", dDdt)
-  # println("dc1dt : ",dc1dt)
-  # println("dc2dt : ",dc2dt)
-  # println("dc3dt : ",dc3dt)
-  # A1, B1
-  dA1dt = compute_dA1dt(r,dc1dt,dc2dt,dc3dt,c2,c3)
-  dB1dt = compute_dB1dt(r,dc1dt,dc2dt,dc3dt,c2,c3)
-
-  # Γ
-  dΓdt = compute_dΓdt(r,A1,B1,dA1dt,dB1dt)
-
-  # a1, b1, b2
-  da1dt = compute_da1dt(B1,Γ,dB1dt,dΓdt)
-  db1dt = compute_db1dt(A1,B1,Γ,dA1dt,dB1dt,dΓdt)
-  db2dt = compute_db2dt(r,A1,Γ,dA1dt,dΓdt)
-
-  # println("Γ : ",Γ)
-  # println("A1 : ",A1)
-  # println("B1 : ",B1)
-  # println("dΓdt : ",dΓdt) # issue here with Nan
-  # println("dA1dt : ",dA1dt) # issue here with Nan
-  # println("dB1dt : ",dB1dt) # issue here with Nan
-  # println("a1,b1,da1dt,db1dt,ϵ,γ,dϵdt,dγdt : ")
-  # println(a1)
-  # println(b1)
-  # println(da1dt) # issue here with Nan
-  # println(db1dt) # issue here with Nan
-  # println(ϵ)
-  # println(γ)
-  # println(dϵdt)
-  # println(dγdt)
-  du[1] = dD = dDdt
-  du[2] = dϵ = dϵdt
-  du[3] = dγ = dγdt
-  du[4] = dσ = compute_dσdt(r,a1,b1,da1dt,db1dt,ϵ,γ,dϵdt,dγdt)
-  du[5] = dτ = compute_dτdt(r,b1,b2,db1dt,db2dt,ϵ,γ,dϵdt,dγdt)
-
-  # assertions
-  @assert dD >= 0
-end
 
 function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
 
@@ -385,11 +315,6 @@ function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
   γ = sqrt(2.0 * e ⊡ e)
 
   @assert !isnan(G)
-  #@assert !isnan(c1)
-  #@assert !isnan(c2)
-  #@assert !isnan(c3)
-  #@assert !isnan(A)
-  #@assert !isnan(B)
   @assert !isnan(A₁)
   @assert !isnan(B₁)
   @assert !isnan(Γ)
@@ -444,7 +369,11 @@ end
 
 ## 
 
-function compute_ϵ̇ij(r,D,σij,σijnext,Δt)
+function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
+
+  # Convert in case automatic differentiation supplies a Matrix to the function
+  (σijnext isa Matrix) && (σijnext = SymmetricTensor{2,3}(σijnext))
+
   𝕀 = SymmetricTensor{2,3}(δ) # Second order identity tensor
 
   # stress at previous timestep
@@ -456,6 +385,9 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt)
   σ̇ij = (σijnext-σij)/Δt
   σ̇ = (1/3)*(tr(σ̇ij))
   τ̇ = sij ⊡ σ̇ij / (2*τ)
+
+  # initialize damage rate
+  Ḋ = 0.0
 
   #damage constants and derivatives
   if r.D₀ == 0
@@ -472,13 +404,17 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt)
     dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   end
 
-  KI = compute_KI(r,(σijnext+σij)/2,D) # compute KI at intermediate stress : TO TEST.
-  #KI = compute_KI(r,σij,D)
-  Ḋ = compute_subcrit_damage_rate(r,KI,D)
+  
   
   t1 = λ₁(A1,B1,σ,τ)*σ̇ij - ( λ₂(r,A1,B1,σ,τ)*σ̇ - (1/3)*A1*B1*τ̇ )*𝕀
   t2 = ( dλ₁dσ(A1,B1,τ)*σ̇ + dλ₁dτ(A1,B1,σ,τ)*τ̇ )*sij
-  t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σij - ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
+  if damaged_allowed
+    KI = compute_KI(r,(σijnext+σij)/2,D) # compute KI at intermediate stress : TO TEST.
+    Ḋ = compute_subcrit_damage_rate(r,KI,D)
+    t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σij - ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
+  else
+    t3 = zero(Tensor{2, 3})
+  end
   ϵ̇ij = 1/(2r.G) * (t1 + t2 + t3)
 
   #ϵ̇ij = insert_into(ϵ̇ij, -1e-5, (1,1)) ######## !!!!!!!!
