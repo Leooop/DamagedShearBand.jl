@@ -26,6 +26,11 @@ function map_id_to_value(tensor::SymmetricTensor,values,indices,i,j)
   end
 end
 
+function filter_offdiagonal(σᵢⱼ ; tol = 1e-5)
+  (abs(σᵢⱼ[1,2]) <= tol) && (σᵢⱼ = insert_into(σᵢⱼ, 0.0, (1,2)))
+  return σᵢⱼ
+end
+
 function get_print_flag(p,iter,tsim,last_tsim_printed)
   if (iter==1) | print_flag_condition(p,iter,tsim,last_tsim_printed)
     print_flag = true
