@@ -6,7 +6,7 @@ using Printf
 # imposed values
 ϵ̇₁₁ = -1e-5
 ϵ̇ⁱξη = 1e-5
-σ₃ = -1e8 # negative in compression
+σ₃ = -5e7 # negative in compression
 
 # initial higher compressive stress multiplier (S = σ₁₁/σ₂₂)
 S_i = 1.0
@@ -23,7 +23,7 @@ Dⁱ = min(Dᵒ+0.15, 0.9)
 # time integration parameters :
 ϵⁱξη_goal = 0.01
 #tspan = (0.0,ϵⁱξη_goal/ϵ̇ⁱξη) # initial and final simulation time
-tspan = (0.0,800)
+tspan = (0.0,500)
 Δt_i = 0.01 # initial timestep
 
 # Build stress and strain tensors 

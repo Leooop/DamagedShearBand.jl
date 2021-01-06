@@ -413,6 +413,7 @@ function residual_initialize(r,Dⁱ,ϵⁱᵢⱼ_guess,σⁱᵢⱼ_guess,u)
   res = Vec(Δϵⁱᵢⱼ[1,1], Δϵⁱᵢⱼ[2,2], Δϵⁱᵢⱼ[3,3], Δϵⁱᵢⱼ[1,2])
   return res
 end
+
 function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan)
   #unpack
   time_maxiter = p.solver.time_maxiter
@@ -483,6 +484,75 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_
       push!(t_vec,tsim)
     end
 
+    i += 1
+
+    # break loop under conditions 
+    if !isnothing(time_maxiter)
+      (length(t_vec)==time_maxiter+1) && break
+    end
+    (Dⁱnext > 0.999) && break
+  end
+  return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
+end
+
+# find S_i and D_i automaticaly so that S_i is maximized with constraint KI(S_i,D_i)<=0
+# and solve for in and out from the beginning of the simulation with fixed D_out = D_i
+function adaptative_time_integration_2_points(r::Rheology,p::Params,σ₃,ϵ̇ⁱξη,Δt,θ,tspan)
+  #unpack
+  time_maxiter = p.solver.time_maxiter
+
+  D_i, S_i, get_KI_mininizer_D_on_S_range(r,1,100,σ₃ ; len=1000)
+  # fill first values
+  σᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
+  ϵᵢⱼ_i_principal = compute_ϵij(r,D_i,σᵢⱼ_i_principal)
+  σᵢⱼ_i = band_coords(σᵢⱼ_i_principal,θ)
+  ϵᵢⱼ_i = band_coords(ϵᵢⱼ_i_principal,θ)
+
+  # initialize containers
+  t_vec = Float64[tspan[1]]
+  S_vec = Float64[S_i]
+  σⁱᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+  σᵒᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+  ϵⁱᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
+  Dⁱ_vec = Float64[D_i]
+  Dᵒ_vec = Float64[D_i]
+
+  # initialize values
+  tsim::Float64 = tspan[1]
+  Snext::Float64 = S_i
+  σⁱᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+  σᵒᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+  ϵⁱᵢⱼnext::typeof(ϵᵢⱼ_i) = ϵᵢⱼ_i
+  Dⁱnext::Float64 = D_i
+  Dᵒnext::Float64 = D_i
+  Δt_next::Float64 = Δt
+  Δt_used::Float64 = Δt
+
+  last_tsim_printed = 0.0
+  last_tsim_saved = 0.0 
+  i = 1 # iter counter
+  while tsim < tspan[2]
+    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
+    print_flag && print_time_iteration(i,tsim)
+
+    # solving procedure depends on the sign of S derivative
+    Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
+    Dᵒnext = Dᵒ_vec[end] # we want to force damage out constant
+    tsim += Δt_used
+
+    # save
+    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
+    if save_flag
+      push!(S_vec,Snext)
+      push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
+      push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
+      push!(ϵⁱᵢⱼ_vec,ϵⁱᵢⱼnext)
+      push!(Dⁱ_vec,Dⁱnext)
+      push!(Dᵒ_vec,Dᵒnext)
+      push!(t_vec,tsim)
+    end
+
+    # increment iter counter
     i += 1
 
     # break loop under conditions 
