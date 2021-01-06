@@ -10,6 +10,7 @@ module DamagedShearBand
   include("utils.jl")
   include("damaged_rheology.jl")
   include("integrators.jl")
+  include("solve.jl")
   include("analysis.jl")
   include("simulations_helpers.jl")
 

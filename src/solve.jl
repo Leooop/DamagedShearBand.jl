@@ -120,12 +120,12 @@ function solve_1_point(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ
     return band_coords(σᵢⱼnext,θ), band_coords(ϵᵢⱼnext,θ), Dnext, u
 end
 
-function adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt)
+function adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt ; damage_growth_out=true)
     e₀ = p.solver.e₀
 
-    Snext1, σⁱᵢⱼnext1, σᵒᵢⱼnext1, ϵⁱᵢⱼnext1, Dⁱnext1, Dᵒnext1, u1 = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt)
-    Smid, σⁱᵢⱼmid, σᵒᵢⱼmid, ϵⁱᵢⱼmid, Dⁱmid, Dᵒmid, umid = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt/2)
-    Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, u2 = solve_2_points(r,p,Smid,σ₃,σⁱᵢⱼmid,σᵒᵢⱼmid,ϵⁱᵢⱼmid,Dᵒ,Dⁱmid,ϵ̇ⁱξη,θ,Δt/2)
+    Snext1, σⁱᵢⱼnext1, σᵒᵢⱼnext1, ϵⁱᵢⱼnext1, Dⁱnext1, Dᵒnext1, u1 = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt ; damage_growth_out)
+    Smid, σⁱᵢⱼmid, σᵒᵢⱼmid, ϵⁱᵢⱼmid, Dⁱmid, Dᵒmid, umid = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt/2 ; damage_growth_out)
+    Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, u2 = solve_2_points(r,p,Smid,σ₃,σⁱᵢⱼmid,σᵒᵢⱼmid,ϵⁱᵢⱼmid,Dᵒ,Dⁱmid,ϵ̇ⁱξη,θ,Δt/2 ; damage_growth_out)
 
     # compute errors for each unknowns physical quantity and ponderate 
     eD = max(Dⁱnext2-Dⁱnext1,Dᵒnext2-Dᵒnext1)
@@ -153,12 +153,12 @@ function adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢ�
     else
         # recursively run with decreased timestep
         factor::Float64 = abs(e₀ref/emax)
-        adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ, Δt*factor) 
+        adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ, Δt*factor ; damage_growth_out) 
         #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
     end
 end
 
-function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt)
+function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt ; damage_growth_out=true)
     ps = p.solver
     # get first guess of the unknowns with an elastic solve
     u = Vec(S, σⁱᵢⱼ[1,1], σⁱᵢⱼ[3,3], ϵⁱᵢⱼ[2,2]) # Snext, σⁱξξnext, σⁱoopnext, ϵⁱηηnext
@@ -167,7 +167,7 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
         # get residual and its gradient with respect to u
         #∇res , res = Tensors.gradient(u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,u), u, :all)
         result = DiffResults.JacobianResult(u)
-        ForwardDiff.jacobian!(result, u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u), u)
+        ForwardDiff.jacobian!(result, u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u;damage_growth_out), u)
         ∇res = DiffResults.jacobian(result)
         res  = DiffResults.value(result)
 
@@ -199,9 +199,9 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
     return Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, u
 end
 
-function residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
+function residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u ; damage_growth_out=true)
 
-    Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ = compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
+    Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ = compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u; damage_growth_out)
     σⁱᵢⱼnext = σⁱᵢⱼ + σ̇ⁱᵢⱼ*Δt
 
     ϵ̇ⁱᵢⱼ_analytical, _ = compute_ϵ̇ij(r,Dⁱ,σⁱᵢⱼ,σⁱᵢⱼnext,Δt ; damaged_allowed=true)
@@ -210,7 +210,7 @@ function residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢ�
     return res
 end
 
-function compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
+function compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u ; damage_growth_out=true)
     Snext, σⁱξξnext, σⁱoopnext, ϵⁱηηnext = u
     σⁱξξ = σⁱᵢⱼ[1,1]
     σⁱoop = σⁱᵢⱼ[3,3]
@@ -219,10 +219,10 @@ function compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢ�
     Ṡ = (Snext - S) / Δt
     ϵⁱξηnext = ϵⁱξη + ϵ̇ⁱξη*Δt
 
-    σ̇ᵒᵢⱼ = compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,σᵒᵢⱼ,Dᵒ,Δt,θ ; damaged_allowed=false) # no damage outside the band
+    σ̇ᵒᵢⱼ = compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,σᵒᵢⱼ,Dᵒ,Δt,θ ; damaged_allowed=damage_growth_out) # no damage outside the band
     σ̇ⁱᵢⱼ = get_σ̇ⁱij_from_primitive_vars(σ̇ᵒᵢⱼ,σⁱξξ,σⁱoop,σⁱξξnext,σⁱoopnext,Δt)
     #σ̇ⁱᵢⱼ = set_plane_strain_oop_stress_rate(σⁱᵢⱼ,σ̇ⁱᵢⱼ,r,Dⁱ,Δt ; damaged_allowed=true)
-    ϵ̇ⁱᵢⱼ = get_ϵ̇ⁱᵢⱼ_from_primitive_vars(r,σᵒᵢⱼ,σ̇ᵒᵢⱼ,ϵⁱηη,ϵⁱξη,Dⁱ,ϵⁱηηnext,ϵⁱξηnext,Δt)
+    ϵ̇ⁱᵢⱼ = get_ϵ̇ⁱᵢⱼ_from_primitive_vars(r,σᵒᵢⱼ,σ̇ᵒᵢⱼ,ϵⁱηη,ϵⁱξη,Dⁱ,ϵⁱηηnext,ϵⁱξηnext,Δt ; damage_growth_out)
     return Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ
 end
 
@@ -235,11 +235,11 @@ function get_σ̇ⁱij_from_primitive_vars(σ̇ᵒᵢⱼ_band,σⁱξξ,σⁱoop
     return σ̇ⁱij_band
 end
 
-function get_ϵ̇ⁱᵢⱼ_from_primitive_vars(r,σᵒᵢⱼ,σ̇ᵒᵢⱼ,ϵⁱηη,ϵⁱξη,D,ϵⁱηηnext,ϵⁱξηnext,Δt)
+function get_ϵ̇ⁱᵢⱼ_from_primitive_vars(r,σᵒᵢⱼ,σ̇ᵒᵢⱼ,ϵⁱηη,ϵⁱξη,D,ϵⁱηηnext,ϵⁱξηnext,Δt ; damage_growth_out=true)
     σᵒᵢⱼnext = σᵒᵢⱼ + σ̇ᵒᵢⱼ*Δt
     ϵ̇ⁱηη = (ϵⁱηηnext - ϵⁱηη) /Δt
     ϵ̇ⁱξη = (ϵⁱξηnext - ϵⁱξη) /Δt
-    ϵ̇ᵒᵢⱼ, _ = compute_ϵ̇ij(r,D,σᵒᵢⱼ,σᵒᵢⱼnext,Δt ; damaged_allowed=false) # no damage outside the band
+    ϵ̇ᵒᵢⱼ, _ = compute_ϵ̇ij(r,D,σᵒᵢⱼ,σᵒᵢⱼnext,Δt ; damaged_allowed=damage_growth_out)
     ϵ̇ⁱᵢⱼ = SymmetricTensor{2,3}([ ϵ̇ᵒᵢⱼ[1,1]   ϵ̇ⁱξη   0  ;
                                     ϵ̇ⁱξη      ϵ̇ⁱηη   0  ;
                                         0         0     0  ]) # ϵ̇ᵒᵢⱼ[3,3] put zero on last term if needed to force plain strain
