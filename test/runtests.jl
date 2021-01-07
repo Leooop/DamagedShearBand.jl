@@ -15,7 +15,7 @@ D = r.D₀
 end
 
 @testset "get_damage_onset" begin
-    Sc = DSB.get_damage_onset(r,σ₃,r.D₀)
+    Sc = DSB.get_damage_onset(r,σ₃)
 
     # KI at damage onset
     σᵢⱼ_onset = DSB.build_principal_stress_tensor(r,Sc,σ₃)
@@ -121,5 +121,7 @@ end
 
 @testset "get_stress_deviation_from_far_field" begin
     σᵢⱼ = DSB.build_principal_stress_tensor(r,S,σ₃,D)
-
+    σᵢⱼ_rotated_90 = DSB.insert_into(σᵢⱼ, (σᵢⱼ[1,1],σᵢⱼ[2,2]), ((2,2),(1,1))) # swap two principals in plane stresses
+    angle = DSB.get_stress_deviation_from_far_field(σᵢⱼ_rotated_90 ; offdiagtol=1e-5, compression_axis=:x)
+    @test angle ≈ 90
 end

@@ -97,12 +97,12 @@ function KI_from_external_load(r,S,σ₃,D)
 end
 
 function build_principal_stress_tensor(r,S,σ₃ ; abstol=1e-15)
-  σᵢⱼ_prev = SymmetricTensor{2,3,Float64}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
+  σᵢⱼ_prev = SymmetricTensor{2,3}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
   return set_plane_strain_oop_stress(σᵢⱼ_prev,r,r.D₀ ; abstol)
 end
 
 function build_principal_stress_tensor(r,S,σ₃,D ; abstol=1e-15)
-  σᵢⱼ_prev = SymmetricTensor{2,3,Float64}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
+  σᵢⱼ_prev = SymmetricTensor{2,3}([S*σ₃ 0 0 ; 0 σ₃ 0 ; 0 0 r.ν*(S+1)*σ₃])
   return set_plane_strain_oop_stress(σᵢⱼ_prev,r,D ; abstol)
 end
 
