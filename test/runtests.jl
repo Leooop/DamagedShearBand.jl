@@ -109,7 +109,7 @@ end
     @test abs(tan_mod_elast_model-tan_mod_theoretical) < 1e-2
 end
 
-@testset "from principal stress to band orientation" begin
+@testset "from principal stress rate to band orientation" begin
     θ = 60.0
     Ṡ = 1e-2
     Δt = 1
@@ -122,6 +122,9 @@ end
 @testset "get_stress_deviation_from_far_field" begin
     σᵢⱼ = DSB.build_principal_stress_tensor(r,S,σ₃,D)
     σᵢⱼ_rotated_90 = DSB.insert_into(σᵢⱼ, (σᵢⱼ[1,1],σᵢⱼ[2,2]), ((2,2),(1,1))) # swap two principals in plane stresses
-    angle = DSB.get_stress_deviation_from_far_field(σᵢⱼ_rotated_90 ; offdiagtol=1e-5, compression_axis=:x)
-    @test angle ≈ 90
+    σᵢⱼ_rotated_30 = DSB.band_coords(σᵢⱼ,60)
+    angle_90 = DSB.get_stress_deviation_from_far_field(σᵢⱼ_rotated_90 ; offdiagtol=1e-5, compression_axis=:x)
+    angle_30 = DSB.get_stress_deviation_from_far_field(σᵢⱼ_rotated_30 ; offdiagtol=1e-5, compression_axis=:x)
+    @test abs(angle_90) ≈ 90
+    @test abs(angle_30) ≈ 30
 end
