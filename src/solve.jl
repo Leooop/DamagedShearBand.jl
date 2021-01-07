@@ -188,14 +188,21 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
     σⁱᵢⱼnext = σⁱᵢⱼ + σ̇ⁱᵢⱼ*Δt
     ϵⁱᵢⱼnext = ϵⁱᵢⱼ + ϵ̇ⁱᵢⱼ*Δt
 
-    KIᵒ = compute_KI(r,(σᵒᵢⱼnext+σᵒᵢⱼ)/2,Dᵒ)
+    # damage growth out
+    if damage_growth_out
+        KIᵒ = compute_KI(r,(σᵒᵢⱼnext+σᵒᵢⱼ)/2,Dᵒ)
+        Ḋᵒ = compute_subcrit_damage_rate(r,KIᵒ,Dᵒ)
+        Dᵒnext = Dᵒ + Ḋᵒ*Δt
+    else
+        Dᵒnext = Dᵒ
+    end
+    # damage growth in
     KIⁱ = compute_KI(r,(σⁱᵢⱼnext+σⁱᵢⱼ)/2,Dⁱ) # compute KI at intermediate stress : TO TEST.
-    Ḋᵒ = compute_subcrit_damage_rate(r,KIᵒ,Dᵒ)
     Ḋⁱ = compute_subcrit_damage_rate(r,KIⁱ,Dⁱ)
+    Dⁱnext = Dⁱ + Ḋⁱ*Δt
     #_ , Ḋⁱ2 = compute_ϵ̇ij(r,Dⁱ,σⁱᵢⱼ,σⁱᵢⱼnext,Δt) # compute damage growth inside the shear band
     #@assert Ḋⁱ == Ḋⁱ2 # shouldn't error out, then remove preceeding line
-    Dᵒnext = Dᵒ + Ḋᵒ*Δt
-    Dⁱnext = Dⁱ + Ḋⁱ*Δt
+    
     return Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, u
 end
 

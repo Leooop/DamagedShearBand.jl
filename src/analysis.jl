@@ -244,7 +244,7 @@ function time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
   return t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec
 end
 
-function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,Dⁱ,Dᵒ,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan)
+function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,Dⁱ,Dᵒ,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=true)
   #unpack
   time_maxiter = p.solver.time_maxiter
 
@@ -282,7 +282,7 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D�
 
     # solving procedure depends on the sign of S derivative
     if bifurcation_flag
-      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
+      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
     else
       σⁱᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Δt_used, Δt_next = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
       σᵒᵢⱼnext = σⁱᵢⱼnext
@@ -294,7 +294,7 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D�
     if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
       if Snext-S_vec[end] <= 0
         bifurcation_flag = true
-        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
+        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
       end
     end
     tsim += Δt_used
@@ -387,7 +387,7 @@ function residual_initialize(r,Dⁱ,ϵⁱᵢⱼ_guess,σⁱᵢⱼ_guess,u)
   return res
 end
 
-function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan)
+function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=true, bifurcate_on=:KI)
   #unpack
   time_maxiter = p.solver.time_maxiter
 
@@ -427,23 +427,27 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_
 
     # solving procedure depends on the sign of S derivative
     if bifurcation_flag
-      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
-      Dᵒnext = Dᵒ_vec[end] # we want to force damage out constant
+      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
     else
-      σⁱᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Δt_used, Δt_next = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
-      σᵒᵢⱼnext = σⁱᵢⱼnext
-      Dᵒnext = Dⁱnext
-      σᵒᵢⱼnext_principal = principal_coords(σᵒᵢⱼnext,θ)
-      Snext = σᵒᵢⱼnext_principal[1,1]/σᵒᵢⱼnext_principal[2,2]
+      σⁱᵢⱼnext_test, ϵⁱᵢⱼnext_test, Dⁱnext_test, Δt_used_test, Δt_next_test = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
+      σᵒᵢⱼnext_test = σⁱᵢⱼnext_test
+      Dᵒnext_test = Dⁱnext_test
+      σᵒᵢⱼnext_principal_test = principal_coords(σᵒᵢⱼnext_test,θ)
+      Snext_test = σᵒᵢⱼnext_principal_test[1,1]/σᵒᵢⱼnext_principal_test[2,2]
+      
+      # compute bifurcation criterion
+      (bifurcate_on==:KI) && ( bifurcation_criterion = (compute_KI(r,σⁱᵢⱼnext_test,Dⁱnext_test)>0) )
+      (bifurcate_on==:S)  && ( bifurcation_criterion = ((Snext_test - Snext)<=0) )
+
+      if bifurcation_criterion
+        bifurcation_flag = true
+        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
+      else
+        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = Snext_test, σⁱᵢⱼnext_test, σᵒᵢⱼnext_test, ϵⁱᵢⱼnext_test, Dⁱnext_test, Dᵒnext_test, Δt_used_test, Δt_next_test
+      end
+
     end
 
-    if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
-      if Snext-S_vec[end] <= 0
-        bifurcation_flag = true
-        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
-        Dᵒnext = Dᵒ_vec[end] # we want to force damage out constant
-      end
-    end
     tsim += Δt_used
 
     save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
@@ -464,17 +468,18 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_
       (length(t_vec)==time_maxiter+1) && break
     end
     (Dⁱnext > 0.999) && break
+    (Dᵒnext > 0.999) && break
   end
   return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
 end
 
 # find S_i and D_i automaticaly so that S_i is maximized with constraint KI(S_i,D_i)<=0
 # and solve for in and out from the beginning of the simulation with fixed D_out = D_i
-function adaptative_time_integration_2_points(r::Rheology,p::Params,σ₃,ϵ̇ⁱξη,Δt,θ,tspan)
+function adaptative_time_integration_2_points(r::Rheology,p::Params,σ₃,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=false)
   #unpack
   time_maxiter = p.solver.time_maxiter
 
-  D_i, S_i, get_KI_mininizer_D_on_S_range(r,1,100,σ₃ ; len=1000)
+  D_i, S_i =  get_KI_mininizer_D_on_S_range(r,1,50,σ₃ ; len=1000)
   # fill first values
   σᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
   ϵᵢⱼ_i_principal = compute_ϵij(r,D_i,σᵢⱼ_i_principal)
@@ -509,9 +514,9 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,σ₃,ϵ̇�
     print_flag && print_time_iteration(i,tsim)
 
     # solving procedure depends on the sign of S derivative
-    Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next)
-    Dᵒnext = Dᵒ_vec[end] # we want to force damage out constant
-    tsim += Δt_used
+    Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
+    
+    tsim += Δt_used # update simulation time
 
     # save
     save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
@@ -537,7 +542,7 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,σ₃,ϵ̇�
   return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
 end
 
-function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan)
+function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=true)
 
   #initialize vectors
   t_vec = tspan[1]:Δt:tspan[2]
@@ -569,8 +574,7 @@ function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,t
 
     # solving procedure depends on the sign of S derivative
     if bifurcation_flag
-      S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt)
-      Dᵒ_vec[i] = Dᵒ_vec[i-1] # we want to force damage out constant 
+      S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt ; damage_growth_out)
     else
       σⁱᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], _ = solve_1_point(r,p,σⁱᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dⁱ_vec[i-1],ϵ̇11,θ,Δt)
       σᵒᵢⱼ_vec[i] = σⁱᵢⱼ_vec[i]
@@ -582,8 +586,7 @@ function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,t
     if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
       (S_vec[i]-S_vec[i-1] <= 0) && (bifurcation_flag = true)
       if bifurcation_flag
-        S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt)
-        Dᵒ_vec[i] = Dᵒ_vec[i-1] # we want to force damage out constant 
+        S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt ; damage_growth_out)
       end
     end
     if Dⁱ_vec[i] > 0.999

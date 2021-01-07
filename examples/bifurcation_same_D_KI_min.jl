@@ -2,6 +2,7 @@
 const DSB = DamagedShearBand
 @time using Plots
 using Printf
+using LaTeXStrings
 ##
 # imposed values
 ϵ̇₁₁ = -1e-5
@@ -13,17 +14,18 @@ S_i = 1.0
 θ = 60.0
 
 # Create a Rheology type instance containing elastic moduli and damage parameters. Change default values by  supplying keywords arguments.
-r = DSB.Rheology(D₀=0.2,n=5.0) 
+r = DSB.Rheology(D₀=0.2,n=5.0)
 
 # initial damage
 #D_i = r.D₀
 Dᵒ, _ = DSB.get_KI_mininizer_D_on_S_range(r,S_i,100,σ₃)
-Dⁱ = min(Dᵒ+0.15, 0.9)
+#Dⁱ = min(Dᵒ+0.15, 0.9)
+D_i = Dᵒ
 
 # time integration parameters :
 ϵⁱξη_goal = 0.01
 tspan = (0.0,ϵⁱξη_goal/ϵ̇ⁱξη) # initial and final simulation time
-#tspan = (0.0,500)
+tspan = (0.0,141.26)
 Δt_i = 0.01 # initial timestep
 
 # Build stress and strain tensors 
@@ -51,7 +53,8 @@ p = DSB.Params(op,sp)
 # -- e₀ is the absolute tolerance used to adapt time stepping, may be a scalar or a NamedTuple with keys (D,σ,ϵ)
 # -- abstol is the absolute tolerance on the unknowns in the Newton solver 
 
-t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec = DSB.adaptative_time_integration_2_points(r,p,S_i,σ₃,Dⁱ,Dᵒ,ϵ̇₁₁,ϵ̇ⁱξη,Δt_i,θ,tspan);
+#t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec = DSB.adaptative_time_integration_2_points(r,p,σ₃,ϵ̇ⁱξη,Δt_i,θ,tspan);
+t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec = DSB.adaptative_time_integration_2_points(r,p,S_i,σ₃,Dᵒ,ϵ̇₁₁,ϵ̇ⁱξη,Δt_i,θ,tspan ; damage_growth_out=false, bifurcate_on=:KI)
 
 #
 σᵒ_p_vec = DSB.principal_coords.(σᵒᵢⱼ_vec,Ref(θ))
@@ -83,7 +86,7 @@ pⁱ_vec = -1/3 * tr.(σⁱᵢⱼ_vec)
 pᵒ_vec = -1/3 * tr.(σⁱᵢⱼ_vec)
 KIⁱ_vec = [DSB.compute_KI(r,σⁱᵢⱼ_vec[i], Dⁱ_vec[i]) for i in eachindex(σⁱᵢⱼ_vec)]
 KIᵒ_vec = [DSB.compute_KI(r,σᵒᵢⱼ_vec[i], Dᵒ_vec[i]) for i in eachindex(σᵒᵢⱼ_vec)]
-γⁱ_vec = [ sqrt(2*ϵᵢⱼ⊡ϵᵢⱼ) for ϵᵢⱼ in ϵⁱᵢⱼ_vec]
+γⁱ_vec = [sqrt(2*ϵᵢⱼ⊡ϵᵢⱼ) for ϵᵢⱼ in ϵⁱᵢⱼ_vec]
 ϵⁱkk_vec = [tr(ϵᵢⱼ) for ϵᵢⱼ in ϵⁱᵢⱼ_vec]
 deviation_out_vec = DSB.get_stress_deviation_from_far_field.(σᵒ_p_vec ; offdiagtol=1e-5)
 deviation_in_vec = DSB.get_stress_deviation_from_far_field.(σⁱ_p_vec ; offdiagtol=1e-5)
@@ -106,7 +109,7 @@ plotlyjs(size=(1000,300))
 # S vs time
 plot(t_vec,γⁱ_vec)
 plot(t_vec,ϵⁱ₁₂_vec)
-plot(t_vec,S_vec)
+plot!(t_vec,S_vec./100)
 plot(ϵⁱ₁₂_vec,S_vec)
 # principal stress orientation deviation from far field vs time
 plot(t_vec,deviation_in_vec)
@@ -117,9 +120,13 @@ plot(deviation_in_vec)
 # Damage vs time
 plot(t_vec,Dⁱ_vec)
 plot!(t_vec,Dᵒ_vec)
+ylims!(0,1)
 # KI/KIC vs time
 plot(t_vec,KIⁱ_vec./r.K₁c)
 plot!(t_vec,KIᵒ_vec./r.K₁c)
+
+plot!(ϵⁱ₁₂_vec,KIⁱ_vec./r.K₁c)
+plot!(ϵⁱ₁₂_vec,KIᵒ_vec./r.K₁c)
 # shear stress on band vs time
 plot(t_vec,σⁱ₁₂_vec)
 plot!(t_vec,σᵒ₁₂_vec)
@@ -131,23 +138,44 @@ plot(t_vec[1:end-1], diff(ϵⁱkk_vec)./diff(γⁱ_vec))
 plot(t_vec, τⁱ_vec)
 plot!(t_vec, τᵒ_vec)
 ## composite plot :
-#lotlyjs(size=(1000,600))
+ϵⁱ₁₂_vec_prev = ϵⁱ₁₂_vec
+S_vec_prev = S_vec
+Dⁱ_vec_prev = Dⁱ_vec
+Dᵒ_vec_prev = Dᵒ_vec
+deviation_in_vec_prev = deviation_in_vec
+deviation_out_vec_prev = deviation_out_vec
+KIⁱ_vec_prev = KIⁱ_vec
+KIᵒ_vec_prev = KIᵒ_vec
+##
+#plotlyjs(size=(1000,600))
 pyplot(size=(1000,600))
-layout = @layout [a ; b ; c]
+layout = @layout [a ; b ; c ; d]
 
-p1 = plot(ϵⁱ₁₂_vec.*100,S_vec,label="S")
-title!(p1,"D₀ = $(r.D₀) & D_in/out = ("*@sprintf("%.2f",Dⁱ)*", "*@sprintf("%.2f",Dᵒ)*") & gammadot = $(2*ϵ̇ⁱξη) & p=$(-σ₃)")
+p1 = plot(ϵⁱ₁₂_vec.*100,S_vec,c=:blue,label="KI controled")
+plot!(p1,ϵⁱ₁₂_vec_prev.*100,S_vec_prev,c=:blue,ls=:dash,label="S controled")
+#title!(p1,"D₀ = $(r.D₀) & D_in/out = ("*@sprintf("%.2f",Dⁱ)*", "*@sprintf("%.2f",Dᵒ)*") & gammadot = $(2*ϵ̇ⁱξη) & p=$(-σ₃)")
+title!(p1,"D₀=$(r.D₀)  &  D_initial="*@sprintf("%.2f",Dⁱ)*"  &  gammadot=$(2*ϵ̇ⁱξη)  &  p=$(-σ₃)")
 ylabel!("σᵒᵘᵗ₁ multiplier (S)")
 
-p2 = plot(ϵⁱ₁₂_vec.*100,Dⁱ_vec,label="inside")
-plot!(p2,γⁱ_vec.*100,Dᵒ_vec,label="outside")
+p2 = plot(ϵⁱ₁₂_vec.*100,Dⁱ_vec,c=:blue,label="inside")
+plot!(p2,ϵⁱ₁₂_vec.*100,Dᵒ_vec,c=:red,label="outside")
+plot!(p2,ϵⁱ₁₂_vec_prev.*100,Dⁱ_vec_prev,c=:blue,ls=:dash,label=nothing)
+plot!(p2,ϵⁱ₁₂_vec_prev.*100,Dᵒ_vec_prev,c=:red,ls=:dash,label=nothing)
 ylabel!("Damage")
 
-p3 = plot(ϵⁱ₁₂_vec.*100,deviation_in_vec,label="inside")
-plot!(p3,ϵⁱ₁₂_vec.*100,deviation_out_vec,label="outside")
-xlabel!("ϵⁱ₁₂ (%)")
+p3 = plot(ϵⁱ₁₂_vec.*100,deviation_in_vec,c=:blue,label="inside")
+plot!(p3,ϵⁱ₁₂_vec.*100,deviation_out_vec,c=:red,label="outside")
+plot!(p3,ϵⁱ₁₂_vec_prev.*100,deviation_in_vec_prev,c=:blue,ls=:dash,label=nothing)
+plot!(p3,ϵⁱ₁₂_vec_prev.*100,deviation_out_vec_prev,c=:red,ls=:dash,label=nothing)
 ylabel!("stress orientation in band")
 
-pl = plot(p1,p2,p3,layout=layout)
+p4 = plot(ϵⁱ₁₂_vec,KIⁱ_vec./r.K₁c,c=:blue,label="inside")
+plot!(p4,ϵⁱ₁₂_vec,KIᵒ_vec./r.K₁c,c=:red,label="outside")
+plot!(p4,ϵⁱ₁₂_vec_prev,KIⁱ_vec_prev./r.K₁c,c=:blue,ls=:dash,label=nothing)
+plot!(p4,ϵⁱ₁₂_vec_prev,KIᵒ_vec_prev./r.K₁c,c=:red,ls=:dash,label=nothing)
+ylabel!(L"K_{I}/K_{Ic}")
+xlabel!("ϵⁱ₁₂ (%)")
 
-#savefig(pl,"./examples/figures/bifurcation_D0=$(r.D₀)_p=$(-σ₃)_ϵ̇ⁱξη=$(ϵ̇ⁱξη).pdf")
+pl = plot(p1,p2,p3,p4,layout=layout,lw=0.)
+
+#savefig(pl,"./examples/figures/KI&S_controled_bifurcation_D0=$(r.D₀)_p=$(-σ₃)_ϵ̇ⁱξη=$(ϵ̇ⁱξη).pdf")
