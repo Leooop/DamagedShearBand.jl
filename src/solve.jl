@@ -128,31 +128,40 @@ function adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢ�
     Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, u2 = solve_2_points(r,p,Smid,σ₃,σⁱᵢⱼmid,σᵒᵢⱼmid,ϵⁱᵢⱼmid,Dᵒ,Dⁱmid,ϵ̇ⁱξη,θ,Δt/2 ; damage_growth_out)
 
     # compute errors for each unknowns physical quantity and ponderate 
-    eD = max(Dⁱnext2-Dⁱnext1,Dᵒnext2-Dᵒnext1)
-    eS = abs(Snext2-Snext1)
-    eσ = norm((u2-u1)[2:3])
-    eϵ = norm((u2-u1)[4])
+    
+    eD = max(abs((Dⁱnext2-Dⁱnext1)/Dⁱnext2),abs((Dᵒnext2-Dᵒnext1)/Dᵒnext2))
+    eS = abs((Snext2-Snext1)/Snext2)
+    #Main.@exfiltrate VAR
+    eσⁱ = maximum(filter(!isnan,abs.((σⁱᵢⱼnext2 - σⁱᵢⱼnext1)./σⁱᵢⱼnext2)))
+    eσᵒ = maximum(filter(!isnan,abs.((σᵒᵢⱼnext2 - σᵒᵢⱼnext1)./σᵒᵢⱼnext2)))
+    eσ = max(eσⁱ,eσᵒ)
+    eϵ = maximum(filter(!isnan,abs.((ϵⁱᵢⱼnext2 - ϵⁱᵢⱼnext1)./ϵⁱᵢⱼnext2)))
+    e_vec = Vec(eD,eS,eσ,eϵ)
+    #println("e_vec = ", e_vec)
     if e₀ isa Real
         e₀ref = e₀
-        e_normalized = (eD, eS, eσ/r.G, eϵ) # todo better
-        ok_flag = all(e_normalized.<e₀)
-        e = maximum(e_normalized)
+        emax = maximum(e_vec)
+        ok_flag = (emax<e₀)
     elseif e₀ isa NamedTuple
         e₀ref = e₀.D
-        ok_flag = (eD<e₀.D) && (eS<e₀.S) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
-        e_normalized = (eD, eS*(e₀ref/e₀.S), eσ*(e₀ref/e₀.σ), eϵ*(e₀ref/e₀.ϵ))
+        e_normalized = e_vec ./ Vec(e₀.D,e₀.S,e₀.σ,e₀.ϵ)
+        ok_flag = all(<(1), e_normalized)
         emax,ind = findmax(e_normalized)
         ok_flag || @debug("maximum error comes from indice $(ind) of (D,S,σ,ϵ)")
     end
 
     if ok_flag
         # increse timestep
+        # println("e₀ref = ", e₀ref)
+        # println("emax = ", emax)
         Δt_next::Float64 = min(Δt*abs(e₀ref/emax),Δt*2)
         # keep best solution
         return Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, Δt, Δt_next
     else
         # recursively run with decreased timestep
-        factor::Float64 = abs(e₀ref/emax)
+        # println("e₀ref = ", e₀ref)
+        # println("emax = ", emax)
+        factor::Float64 = 0.1
         adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ, Δt*factor ; damage_growth_out) 
         #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
     end
