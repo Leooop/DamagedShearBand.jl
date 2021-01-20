@@ -1,4 +1,5 @@
 using DamagedShearBand; const DSB = DamagedShearBand
+using Tensors
 using Test
 
 # Data :

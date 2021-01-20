@@ -241,6 +241,7 @@ function adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
 end
 
 function time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
+  flags = p.flags
   t_vec = tspan[1]:Δt:tspan[2]
   σᵢⱼ_vec = Vector{SymmetricTensor{2,3}}(undef,length(t_vec))
   ϵᵢⱼ_vec = similar(σᵢⱼ_vec)
@@ -250,8 +251,8 @@ function time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
   D_vec[1] = D_i
   last_tsim_printed = 0.0
   for i in 2:length(t_vec)
-    print_flag, last_tsim_printed = get_print_flag(p,i,t_vec[i-1],last_tsim_printed)
-    print_flag && print_time_iteration(i,t_vec[i-1])
+    set_print_flag!(p,i,t_vec[i-1])
+    flags.print && print_time_iteration(i,t_vec[i-1])
   
     σᵢⱼ_vec[i], ϵᵢⱼ_vec[i], D_vec[i], u = solve(r,p,σᵢⱼ_vec[i-1],ϵᵢⱼ_vec[i-1],D_vec[i-1],ϵ̇11,Δt)
   end
