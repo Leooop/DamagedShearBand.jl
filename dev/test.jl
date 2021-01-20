@@ -106,6 +106,7 @@ D_i = r.D₀
 #t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, maxiter=100)
 t_vec_a, σᵢⱼ_vec_a, ϵᵢⱼ_vec_a, D_vec_a = DSB.adaptative_time_integration(r,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan ; abstol=1e-12, time_maxiter=nothing, newton_maxiter=100, e₀=(D=1e-4, σ=1.0, ϵ=1e-6))
 
+
 # σ = 1/3 *tr(σᵢⱼ_i)
 # I = SymmetricTensor{2,3}(DSB.δ)
 # sij = σᵢⱼ_i - σ*I
@@ -203,34 +204,19 @@ test_func(1,2,3)
 nt = (a=1,b=2)
 @time isdefined(nt,:a)
 
-#unpack
-time_maxiter = p.solver.time_maxiter
+D_vec = 0.6495327404332681:0.000001:0.6495527404332681
+KI_vec = [DSB.compute_KI(r,DSB.build_principal_stress_tensor(r,22.207207207207208,σ₃,D ; abstol=1e-15),D) for D in D_vec]
+_,ind = findmin(KI_vec)
+D_vec[ind]
 
-# fill first values
-σᵒᵢⱼ_i, σⁱᵢⱼ_i, ϵᵒᵢⱼ_i, ϵⁱᵢⱼ_i = DSB.initialize_state_var_D(r,p,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
-Ttensors = eltype(σᵒᵢⱼ_i)
+op = DSB.OutputParams(save_frequency = n_iter_saved/(tspan[2]-tspan[1]),
+                      save_period = 1000,
+                      print_frequency = n_iter_printed/(tspan[2]-tspan[1]),
+                      print_period = 1000)
 
-# initialize containers
-t_vec = Float64[tspan[1]]
-S_vec = Float64[S_i]
-σⁱᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[σⁱᵢⱼ_i]
-σᵒᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[σᵒᵢⱼ_i]
-ϵⁱᵢⱼ_vec = SymmetricTensor{2,3,Ttensors}[ϵⁱᵢⱼ_i]
-Dⁱ_vec = Float64[Dⁱ]
-Dᵒ_vec = Float64[Dᵒ]
-
-# initialize values
-tsim = tspan[1]
-Snext = S_i
-σⁱᵢⱼnext = σⁱᵢⱼ_i
-σᵒᵢⱼnext = σᵒᵢⱼ_i
-ϵⁱᵢⱼnext = ϵⁱᵢⱼ_i
-Dⁱnext = Dⁱ
-Dᵒnext = Dᵒ
-Δt_next = Δt
-Δt_used = Δt
-
-last_tsim_printed = 0.0
-last_tsim_saved = 0.0
-bifurcation_flag = (Dⁱ==Dᵒ) ? false : true
-i = 1 # iter counter
+sp = DSB.SolverParams(newton_abstol = 1e-12,
+                      newton_maxiter = 100,
+                      time_maxiter = nothing,
+                      e₀ = 1e-4, #(D=1e-2, S=1e-2, σ=100.0, ϵ=1e-2))
+                      adaptative_maxrecursions = 50)
+p = DSB.Params(op,sp)

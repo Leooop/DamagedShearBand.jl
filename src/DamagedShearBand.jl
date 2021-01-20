@@ -1,7 +1,6 @@
 module DamagedShearBand
 
-  using Reexport
-  @reexport using Tensors
+  using Tensors
   import DiffResults
   import ForwardDiff
   using Optim

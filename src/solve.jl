@@ -56,17 +56,17 @@ function adaptative_solve_1_point(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ,Δt)
     if e₀ isa Real
         e₀ref = e₀
         e_normalized = (eD, eσ/r.G, eϵ)
-        ok_flag = all(e_normalized.<e₀)
+        acceptable_error_flag = all(e_normalized.<e₀)
         e = maximum(e_normalized)
     elseif e₀ isa NamedTuple
         e₀ref = e₀.D
-        ok_flag = (eD<e₀.D) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
+        acceptable_error_flag = (eD<e₀.D) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
         e_normalized = (eD, eσ*(e₀ref/e₀.σ), eϵ*(e₀ref/e₀.ϵ))
         e,ind = findmax(e_normalized)
         ok_flag || @debug("maximum error comes from indice $(ind) of (D,σ,ϵ)")
     end
 
-    if ok_flag
+    if acceptable_error_flag
         # increse timestep
         Δt_next = min(Δt*abs(e₀ref/e),Δt*2)
         # keep best solution
@@ -120,55 +120,85 @@ function solve_1_point(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,θ
     return band_coords(σᵢⱼnext,θ), band_coords(ϵᵢⱼnext,θ), Dnext, u
 end
 
-function adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt ; damage_growth_out=true)
+function adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,irecursions,Δt ; damage_growth_out=true)
+    # unpacking
     e₀ = p.solver.e₀
-
+    flags = p.flags
+    maxrecursions = p.solver.adaptative_maxrecursions
+    irecursions += 1
+    # solving procedures
+    # integration over Δt
     Snext1, σⁱᵢⱼnext1, σᵒᵢⱼnext1, ϵⁱᵢⱼnext1, Dⁱnext1, Dᵒnext1, u1 = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt ; damage_growth_out)
-    Smid, σⁱᵢⱼmid, σᵒᵢⱼmid, ϵⁱᵢⱼmid, Dⁱmid, Dᵒmid, umid = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt/2 ; damage_growth_out)
-    Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, u2 = solve_2_points(r,p,Smid,σ₃,σⁱᵢⱼmid,σᵒᵢⱼmid,ϵⁱᵢⱼmid,Dᵒ,Dⁱmid,ϵ̇ⁱξη,θ,Δt/2 ; damage_growth_out)
+    flags.nan && (flags.nan1 = true)
 
+    # integration over Δt/2 twice
+    Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, u2 = Snext1, σⁱᵢⱼnext1, σᵒᵢⱼnext1, ϵⁱᵢⱼnext1, Dⁱnext1, Dᵒnext1, u1
+    if !flags.nan
+        Smid, σⁱᵢⱼmid, σᵒᵢⱼmid, ϵⁱᵢⱼmid, Dⁱmid, Dᵒmid, umid = solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt/2 ; damage_growth_out)
+        flags.nan && (flags.nan2 = true)
+        # run second part of the integration if first on did not produces NaNs
+        Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, u2 = solve_2_points(r,p,Smid,σ₃,σⁱᵢⱼmid,σᵒᵢⱼmid,ϵⁱᵢⱼmid,Dᵒ,Dⁱmid,ϵ̇ⁱξη,θ,Δt/2 ; damage_growth_out)
+        flags.nan && (flags.nan2 = true)
+    end
+
+    print_nans_error(p,Δt) # prints an error message and set nan_flag to true if nan1 or nan2 flags are true
+    if flags.nan 
+        if irecursions == maxrecursions
+            @warn "NaNs and maximum number of recursives calls to solve. Aborting the simulation"
+            return S, σⁱᵢⱼ, σᵒᵢⱼ, ϵⁱᵢⱼ, Dⁱ, Dᵒ, Δt, Δt # return input values to save a last working state
+        end
+        factor = 0.2
+        adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,irecursions, Δt*factor ; damage_growth_out) 
+    end
+
+    # if nans
     # compute errors for each unknowns physical quantity and ponderate 
-    
     eD = max(abs((Dⁱnext2-Dⁱnext1)/Dⁱnext2),abs((Dᵒnext2-Dᵒnext1)/Dᵒnext2))
     eS = abs((Snext2-Snext1)/Snext2)
-    #Main.@exfiltrate VAR
     eσⁱ = maximum(filter(!isnan,abs.((σⁱᵢⱼnext2 - σⁱᵢⱼnext1)./σⁱᵢⱼnext2)))
     eσᵒ = maximum(filter(!isnan,abs.((σᵒᵢⱼnext2 - σᵒᵢⱼnext1)./σᵒᵢⱼnext2)))
     eσ = max(eσⁱ,eσᵒ)
     eϵ = maximum(filter(!isnan,abs.((ϵⁱᵢⱼnext2 - ϵⁱᵢⱼnext1)./ϵⁱᵢⱼnext2)))
     e_vec = Vec(eD,eS,eσ,eϵ)
-    #println("e_vec = ", e_vec)
+    e_norm_max = 0
+    id_e_norm_max = 0
     if e₀ isa Real
-        e₀ref = e₀
-        emax = maximum(e_vec)
-        ok_flag = (emax<e₀)
+        e_normalized = e_vec./e₀
+        e_norm_max, id_e_norm_max = findmax(e_normalized)
     elseif e₀ isa NamedTuple
-        e₀ref = e₀.D
         e_normalized = e_vec ./ Vec(e₀.D,e₀.S,e₀.σ,e₀.ϵ)
-        ok_flag = all(<(1), e_normalized)
-        emax,ind = findmax(e_normalized)
-        ok_flag || @debug("maximum error comes from indice $(ind) of (D,S,σ,ϵ)")
+        e_norm_max, id_e_norm_max = findmax(e_normalized)
+    end
+    flags.acceptable_error = (e_norm_max < 1)
+
+    if irecursions == maxrecursions
+        flags.acceptable_error = true
+        components_tuple = ("D","S","σ","ϵ")
+        @warn "50 recursive call to lower timestep, Δt = $(Δt), continuing with max relative error emax of $(e_norm_max) on $(components_tuple[id_e_norm_max])..."
     end
 
-    if ok_flag
+    if flags.acceptable_error
         # increse timestep
         # println("e₀ref = ", e₀ref)
         # println("emax = ", emax)
-        Δt_next::Float64 = min(Δt*abs(e₀ref/emax),Δt*2)
+        Δt_next::Float64 = min(Δt/e_norm_max,Δt*2)
         # keep best solution
         return Snext2, σⁱᵢⱼnext2, σᵒᵢⱼnext2, ϵⁱᵢⱼnext2, Dⁱnext2, Dᵒnext2, Δt, Δt_next
     else
         # recursively run with decreased timestep
         # println("e₀ref = ", e₀ref)
         # println("emax = ", emax)
-        factor::Float64 = 0.1
-        adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ, Δt*factor ; damage_growth_out) 
+        factor::Float64 = 0.2
+        adaptative_solve_2_points(r,p,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,irecursions, Δt*factor ; damage_growth_out) 
         #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
     end
 end
 
 function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵⁱᵢⱼ,Dᵒ,Dⁱ,ϵ̇ⁱξη,θ,Δt ; damage_growth_out=true)
+    # unpacking :
     ps = p.solver
+    flags=p.flags
+
     # get first guess of the unknowns with an elastic solve
     u = Vec(S, σⁱᵢⱼ[1,1], σⁱᵢⱼ[3,3], ϵⁱᵢⱼ[2,2]) # Snext, σⁱξξnext, σⁱoopnext, ϵⁱηηnext
     #@debug "u_i = $u"
@@ -176,13 +206,25 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
         # get residual and its gradient with respect to u
         #∇res , res = Tensors.gradient(u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,u), u, :all)
         result = DiffResults.JacobianResult(u)
-        ForwardDiff.jacobian!(result, u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u;damage_growth_out), u)
+        try
+            ForwardDiff.jacobian!(result, u -> residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u;damage_growth_out), u)
+        catch
+            @warn "Jacobian calculation generates nans.\n Exiting newton iter $(i) \n"
+            flags.nan = true
+            break
+        end
         ∇res = DiffResults.jacobian(result)
         res  = DiffResults.value(result)
 
         # update u with Newton algo
         δu = - ∇res\res
-        u = u + δu
+        if any(isnan.(δu))
+            @warn "Solution vector update δu contains nans : $(δu).\n Exiting newton iter $(i) with residual norm of $(norm(res)) \n"
+            flags.nan = true
+            break
+        else
+            u = u + δu
+        end
         #@debug "δu = $δu"
         #@debug "typeof(u) = $(typeof(u))"
 
@@ -191,6 +233,14 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
         (i == ps.newton_maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
     end
     # update strains and stresses with converged u
+    # any(isnan.((S,Dⁱ,Dᵒ))) && println("(S,Dⁱ,Dᵒ) : ", (S,Dⁱ,Dᵒ))
+    # any(isnan.(ϵⁱᵢⱼ)) && println("ϵⁱᵢⱼ : ",ϵⁱᵢⱼ)
+    # any(isnan.(σⁱᵢⱼ)) && println("σⁱᵢⱼ : ",σⁱᵢⱼ)
+    # any(isnan.(σᵒᵢⱼ)) && println("σᵒᵢⱼ : ",σᵒᵢⱼ)
+    # any(isnan.(u)) && println("u : ",u)
+    
+    flags.nan && (return S, σⁱᵢⱼ, σᵒᵢⱼ, ϵⁱᵢⱼ, Dⁱ, Dᵒ, u)
+
     Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ = compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u)
     Snext = S + Ṡ*Δt
     σᵒᵢⱼnext = σᵒᵢⱼ + σ̇ᵒᵢⱼ*Δt
@@ -213,6 +263,7 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
     #@assert Ḋⁱ == Ḋⁱ2 # shouldn't error out, then remove preceeding line
     
     return Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, u
+    
 end
 
 function residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u ; damage_growth_out=true)
@@ -234,6 +285,12 @@ function compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢ�
     ϵⁱξη = ϵⁱᵢⱼ[1,2]
     Ṡ = (Snext - S) / Δt
     ϵⁱξηnext = ϵⁱξη + ϵ̇ⁱξη*Δt
+
+    if isnan(Ṡ)
+        println("Snext : ",Snext.value)
+        println("S : ",S)
+        println("Δt : ",Δt)
+    end
 
     σ̇ᵒᵢⱼ = compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,σᵒᵢⱼ,Dᵒ,Δt,θ ; damaged_allowed=damage_growth_out) # no damage outside the band
     σ̇ⁱᵢⱼ = get_σ̇ⁱij_from_primitive_vars(σ̇ᵒᵢⱼ,σⁱξξ,σⁱoop,σⁱξξnext,σⁱoopnext,Δt)
@@ -270,11 +327,15 @@ function compute_rotated_stress_rate_from_principal_coords(r,Ṡ,σ₃,σᵢⱼ_
 end
 function compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,σᵢⱼ_band,D,Δt,θ; damaged_allowed=true)
     σ̇ᵢⱼ_band = compute_rotated_stress_rate_guess(r,Ṡ,σ₃,θ)
+    #any(isnan.(σ̇ᵢⱼ_band)) && @error("isnan here !")
     σ̇ᵢⱼ_band = set_plane_strain_oop_stress_rate(σᵢⱼ_band,σ̇ᵢⱼ_band,r,D,Δt ; abstol=1e-16, damaged_allowed)
     return σ̇ᵢⱼ_band
 end
 
 function compute_rotated_stress_rate_guess(r,Ṡ,σ₃,θ)
+    if isnan(Ṡ) 
+        throw(@error("isnan here !"))
+    end
     σ̇ᵢⱼ_principal = SymmetricTensor{2,3}([Ṡ*σ₃ 0 0 ; 0 0 0 ; 0 0 r.ν*Ṡ*σ₃])
     σ̇ᵢⱼ_band = band_coords(σ̇ᵢⱼ_principal,θ)
     return σ̇ᵢⱼ_band

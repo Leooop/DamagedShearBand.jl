@@ -31,36 +31,56 @@ function filter_offdiagonal(σᵢⱼ ; tol = 1e-5)
   return σᵢⱼ
 end
 
-function get_print_flag(p,iter,tsim,last_tsim_printed)
-  if (iter==1) | print_flag_condition(p,iter,tsim,last_tsim_printed)
-    print_flag = true
-    last_tsim_printed = tsim
+function set_print_flag!(p,iter,tsim)
+  flags = p.flags
+  if (iter==1) | print_flag_condition(p,iter,tsim)
+    flags.print = true
+    p.output.last_tsim_printed[] = tsim
+  elseif flags.nan & (p.output.last_tsim_printed[] != tsim)
+    flags.print = true
+    p.output.last_tsim_printed[] = tsim
   else 
-    print_flag = false
+    flags.print = false
   end
-  return print_flag, last_tsim_printed
+  return nothing
 end
 
-function get_save_flag(p,iter,tsim,last_tsim_saved)
-  if (iter==1) | save_flag_condition(p,iter,tsim,last_tsim_saved)
-    save_flag = true
-    last_tsim_saved = tsim
+function set_save_flag!(p,iter,tsim)
+  flags = p.flags
+  if (iter==1) | save_flag_condition(p,iter,tsim)
+    flags.save = true
+    p.output.last_tsim_saved[] = tsim
+  elseif flags.nan & (p.output.last_tsim_saved[] != tsim)
+    flags.save = true
+    p.output.last_tsim_saved[] = tsim
   else 
-    save_flag = false
+    flags.save = false
   end
-  return save_flag, last_tsim_saved
+  return nothing
 end
 
-print_flag_condition(p::Params{TF,Nothing},iter,tsim,last_tsim) where {TF<:Real} = ( (tsim-last_tsim) >= (1/p.output.print_frequency) )
-print_flag_condition(p::Params{Nothing,TP},iter,tsim,last_tsim) where {TP<:Real} = (iter%p.output.print_period == 0)
-function print_flag_condition(p::Params{TF,TP},iter,tsim,last_tsim) where {TF<:Real,TP<:Real}
-  return ( (tsim-last_tsim) >= (1/p.output.print_frequency) ) || (iter%p.output.print_period == 0)
+print_flag_condition(p::Params{TF,Nothing},iter,tsim) where {TF<:Real} = ( (tsim-p.output.last_tsim_printed[]) >= (1/p.output.print_frequency) )
+print_flag_condition(p::Params{Nothing,TP},iter,tsim) where {TP<:Real} = (iter%p.output.print_period == 0)
+function print_flag_condition(p::Params{TF,TP},iter,tsim) where {TF<:Real,TP<:Real}
+  return ( (tsim-p.output.last_tsim_printed[]) >= (1/p.output.print_frequency) ) || (iter%p.output.print_period == 0)
 end
 
-save_flag_condition(p::Params{T1,T2,TF,Nothing},iter,tsim,last_tsim) where {T1,T2,TF<:Real} = ( (tsim-last_tsim) >= (1/p.output.save_frequency) )
-save_flag_condition(p::Params{T1,T2,Nothing,TP},iter,tsim,last_tsim) where {T1,T2,TP<:Real} = (iter%p.output.save_period == 0)
-function save_flag_condition(p::Params{T1,T2,TF,TP},iter,tsim,last_tsim) where {T1,T2,TF<:Real,TP<:Real}
-  return ( (tsim-last_tsim) >= (1/p.output.save_frequency) ) || (iter%p.output.save_period == 0)
+save_flag_condition(p::Params{T1,T2,TF,Nothing},iter,tsim) where {T1,T2,TF<:Real} = ( (tsim-p.output.last_tsim_saved[]) >= (1/p.output.save_frequency) )
+save_flag_condition(p::Params{T1,T2,Nothing,TP},iter,tsim) where {T1,T2,TP<:Real} = (iter%p.output.save_period == 0)
+function save_flag_condition(p::Params{T1,T2,TF,TP},iter,tsim) where {T1,T2,TF<:Real,TP<:Real}
+  return ( (tsim-p.output.last_tsim_saved[]) >= (1/p.output.save_frequency) ) || (iter%p.output.save_period == 0)
 end
 
 print_time_iteration(iter,tsim) = print("------","\n","time iteration $iter : $tsim","\n","------")
+
+function print_nans_error(p::Params,Δt)
+    flags = p.flags
+    if flags.nan1
+        flags.nan = true
+        @error "integration over Δt=$(Δt) produced NaNs."
+    elseif flags.nan2
+        flags.nan = true
+        @error "integration over Δt/2=$(Δt/2) twice produced NaNs."
+    end
+end
+

@@ -57,6 +57,7 @@ Maybe(T)=Union{T,Nothing}
   newton_maxiter::Int = 100
   time_maxiter::TI = nothing
   e₀::TE = 1e-12
+  adaptative_maxrecursions::Int = 50
 end
 
 @kwdef struct OutputParams{T1<:Maybe(Real),T2<:Maybe(Integer),T3<:Maybe(Real),T4<:Maybe(Integer)}
@@ -64,15 +65,26 @@ end
   print_period::T2=1
   save_frequency::T3=nothing
   save_period::T4=1
+  last_tsim_printed::Ref{Float64}=Ref(0.0)
+  last_tsim_saved::Ref{Float64}=Ref(0.0)
 end
 
-#OutputParams(::T1,::T2,::T3,::T4) where{T1<:Real,T2<:Real}
+mutable struct Flags
+  print::Bool
+  save::Bool
+  bifurcation::Bool
+  acceptable_error::Bool
+  nan::Bool
+  nan1::Bool
+  nan2::Bool
+  Flags()=new(false,false,false,false,false,false,false)
+end
 
 struct Params{T1,T2,T3,T4,TI,TE}
   solver::SolverParams{TI,TE}
   output::OutputParams{T1,T2,T3,T4}
+  flags::Flags
 end
-
-Params(o::OutputParams,s::SolverParams) = Params(s::SolverParams,o::OutputParams)
-
+Params(s::SolverParams,o::OutputParams) = Params(s,o,Flags())
+Params(o::OutputParams,s::SolverParams) = Params(s,o,Flags())
 # Model type ? 2points, 1point

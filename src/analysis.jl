@@ -4,7 +4,7 @@ function set_plane_strain_oop_stress(σᵢⱼ,r,D ; abstol=1e-12, maxiter=100, �
   !isnothing(σoop_guess) && (σᵢⱼ = insert_σoop(σᵢⱼ,σoop_guess))
   σoop = σᵢⱼ[3,3]
   # get damage constants:
-  A1::Float64,B1::Float64 = compute_A1B1(r,D)
+  A1,B1 = compute_A1B1(r,D)
 
   for i in 1:maxiter
     
@@ -63,13 +63,27 @@ function zero_at_damage_onset(r,S,σ₃,D)
   return abs(τ/σ) - A/B
 end
 
-function get_KI_mininizer_D(r,S,σ₃)
+function get_KI_minimizer_S(r,D,σ₃)
+  func_to_minimize = S -> abs(zero_at_damage_onset(r,S,σ₃,D)) #optimize function needs an array of variables
+  Sc = optimize(func_to_minimize, 1, 1e4,rel_tol=1e-15).minimizer[1]
+  return Sc
+end
+
+#tested
+function get_KI_minimizer_D_S(r,σ₃)
+  func_to_minimize = D -> -get_KI_minimizer_S(r,D,σ₃)
+  Dc = optimize(func_to_minimize, r.D₀, 0.999, rel_tol=1e-15).minimizer[1]
+  Sc = get_KI_minimizer_S(r,Dc,σ₃)
+  return Dc, Sc 
+end
+
+function get_KI_minimizer_D(r,S,σ₃)
   func_to_minimize = D -> KI_from_external_load(r,S,σ₃,D) #optimize function needs an array of variables
-  Dc = optimize(func_to_minimize, r.D₀, 0.99,rel_tol=1e-10).minimizer[1]
+  Dc = optimize(func_to_minimize, r.D₀, 0.999, rel_tol=1e-10).minimizer[1]
   return Dc
 end
 
-function get_KI_mininizer_D_on_S_range(r,Smin,Smax,σ₃ ; len=1000)
+function get_KI_minimizer_D_on_S_range(r,Smin,Smax,σ₃ ; len=1000)
   S_vec = range(Smin,Smax ; length=len)
   D_vec = range(r.D₀,0.999 ; length=len)
   σᵢⱼ_mat = [build_principal_stress_tensor(r,S,σ₃,D) for S in S_vec, D in D_vec]
@@ -83,7 +97,7 @@ function get_KI_mininizer_D_on_S_range(r,Smin,Smax,σ₃ ; len=1000)
       continue
     else
       S = S_vec[iS]
-      Dc = get_KI_mininizer_D(r,S,σ₃)
+      Dc = get_KI_minimizer_D(r,S,σ₃)
       break
     end
   end
@@ -247,6 +261,7 @@ end
 function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,Dⁱ,Dᵒ,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=true)
   #unpack
   time_maxiter = p.solver.time_maxiter
+  flags = p.flags
 
   # fill first values
   σᵒᵢⱼ_i, σⁱᵢⱼ_i, ϵᵒᵢⱼ_i, ϵⁱᵢⱼ_i = initialize_state_var_D(r,p,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
@@ -272,17 +287,15 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D�
   Δt_next::Float64 = Δt
   Δt_used::Float64 = Δt
 
-  last_tsim_printed = 0.0
-  last_tsim_saved = 0.0
-  bifurcation_flag = (Dⁱ==Dᵒ) ? false : true
+  flags.bifurcation = (Dⁱ==Dᵒ) ? false : true
   i = 1 # iter counter
   while tsim < tspan[2]
-    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
-    print_flag && print_time_iteration(i,tsim)
+    set_print_flag!(p,i,tsim)
+    flags.print && print_time_iteration(i,tsim)
 
     # solving procedure depends on the sign of S derivative
-    if bifurcation_flag
-      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
+    if flags.bifurcation
+      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,-1,Δt_next ; damage_growth_out)
     else
       σⁱᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Δt_used, Δt_next = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
       σᵒᵢⱼnext = σⁱᵢⱼnext
@@ -291,16 +304,20 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D�
       Snext = σᵒᵢⱼnext_principal[1,1]/σᵒᵢⱼnext_principal[2,2]
     end
 
-    if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
+    if !flags.bifurcation # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
       if Snext-S_vec[end] <= 0
-        bifurcation_flag = true
-        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
+        flags.bifurcation = true
+        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,-1,Δt_next ; damage_growth_out)
       end
     end
-    tsim += Δt_used
 
-    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
-    if save_flag
+    # test :
+    p.flags.nan && println("Nan flag true in main function, should return")
+    # update tsim if no nans
+    !flags.nan ? (tsim += Δt_used) : nothing
+
+    set_save_flag!(p,i,tsim)
+    if flags.save
       push!(S_vec,Snext)
       push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
       push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
@@ -313,6 +330,7 @@ function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D�
     i += 1
 
     # break loop under conditions 
+    flags.nan && break
     if !isnothing(time_maxiter)
       (length(t_vec)==time_maxiter+1) && break
     end
@@ -387,163 +405,163 @@ function residual_initialize(r,Dⁱ,ϵⁱᵢⱼ_guess,σⁱᵢⱼ_guess,u)
   return res
 end
 
-function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=true, bifurcate_on=:KI)
-  #unpack
-  time_maxiter = p.solver.time_maxiter
+# function adaptative_time_integration_2_points(r::Rheology,p::Params,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=true, bifurcate_on=:KI)
+#   #unpack
+#   time_maxiter = p.solver.time_maxiter
 
-  # fill first values
-  σᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
-  ϵᵢⱼ_i_principal = compute_ϵij(r,D_i,σᵢⱼ_i_principal)
-  σᵢⱼ_i = band_coords(σᵢⱼ_i_principal,θ)
-  ϵᵢⱼ_i = band_coords(ϵᵢⱼ_i_principal,θ)
+#   # fill first values
+#   σᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
+#   ϵᵢⱼ_i_principal = compute_ϵij(r,D_i,σᵢⱼ_i_principal)
+#   σᵢⱼ_i = band_coords(σᵢⱼ_i_principal,θ)
+#   ϵᵢⱼ_i = band_coords(ϵᵢⱼ_i_principal,θ)
 
-  # initialize containers
-  t_vec = Float64[tspan[1]]
-  S_vec = Float64[S_i]
-  σⁱᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
-  σᵒᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
-  ϵⁱᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
-  Dⁱ_vec = Float64[D_i]
-  Dᵒ_vec = Float64[D_i]
+#   # initialize containers
+#   t_vec = Float64[tspan[1]]
+#   S_vec = Float64[S_i]
+#   σⁱᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+#   σᵒᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+#   ϵⁱᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
+#   Dⁱ_vec = Float64[D_i]
+#   Dᵒ_vec = Float64[D_i]
 
-  # initialize values
-  tsim::Float64 = tspan[1]
-  Snext::Float64 = S_i
-  σⁱᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
-  σᵒᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
-  ϵⁱᵢⱼnext::typeof(ϵᵢⱼ_i) = ϵᵢⱼ_i
-  Dⁱnext::Float64 = D_i
-  Dᵒnext::Float64 = D_i
-  Δt_next::Float64 = Δt
-  Δt_used::Float64 = Δt
+#   # initialize values
+#   tsim::Float64 = tspan[1]
+#   Snext::Float64 = S_i
+#   σⁱᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+#   σᵒᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+#   ϵⁱᵢⱼnext::typeof(ϵᵢⱼ_i) = ϵᵢⱼ_i
+#   Dⁱnext::Float64 = D_i
+#   Dᵒnext::Float64 = D_i
+#   Δt_next::Float64 = Δt
+#   Δt_used::Float64 = Δt
 
-  last_tsim_printed = 0.0
-  last_tsim_saved = 0.0 
-  bifurcation_flag = false
-  i = 1 # iter counter
-  while tsim < tspan[2]
-    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
-    print_flag && print_time_iteration(i,tsim)
+#   last_tsim_printed = 0.0
+#   last_tsim_saved = 0.0 
+#   bifurcation_flag = false
+#   i = 1 # iter counter
+#   while tsim < tspan[2]
+#     print_flag, last_tsim_printed = set_print_flag!(p,i,tsim,last_tsim_printed)
+#     print_flag && print_time_iteration(i,tsim)
 
-    # solving procedure depends on the sign of S derivative
-    if bifurcation_flag
-      Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
-    else
-      σⁱᵢⱼnext_test, ϵⁱᵢⱼnext_test, Dⁱnext_test, Δt_used_test, Δt_next_test = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
-      σᵒᵢⱼnext_test = σⁱᵢⱼnext_test
-      Dᵒnext_test = Dⁱnext_test
-      σᵒᵢⱼnext_principal_test = principal_coords(σᵒᵢⱼnext_test,θ)
-      Snext_test = σᵒᵢⱼnext_principal_test[1,1]/σᵒᵢⱼnext_principal_test[2,2]
+#     # solving procedure depends on the sign of S derivative
+#     if bifurcation_flag
+#       Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
+#     else
+#       σⁱᵢⱼnext_test, ϵⁱᵢⱼnext_test, Dⁱnext_test, Δt_used_test, Δt_next_test = adaptative_solve_1_point(r,p,σⁱᵢⱼnext,ϵⁱᵢⱼnext,Dⁱnext,ϵ̇11,θ,Δt)
+#       σᵒᵢⱼnext_test = σⁱᵢⱼnext_test
+#       Dᵒnext_test = Dⁱnext_test
+#       σᵒᵢⱼnext_principal_test = principal_coords(σᵒᵢⱼnext_test,θ)
+#       Snext_test = σᵒᵢⱼnext_principal_test[1,1]/σᵒᵢⱼnext_principal_test[2,2]
       
-      # compute bifurcation criterion
-      (bifurcate_on==:KI) && ( bifurcation_criterion = (compute_KI(r,σⁱᵢⱼnext_test,Dⁱnext_test)>0) )
-      (bifurcate_on==:S)  && ( bifurcation_criterion = ((Snext_test - Snext)<=0) )
+#       # compute bifurcation criterion
+#       (bifurcate_on==:KI) && ( bifurcation_criterion = (compute_KI(r,σⁱᵢⱼnext_test,Dⁱnext_test)>0) )
+#       (bifurcate_on==:S)  && ( bifurcation_criterion = ((Snext_test - Snext)<=0) )
 
-      if bifurcation_criterion
-        bifurcation_flag = true
-        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
-      else
-        Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = Snext_test, σⁱᵢⱼnext_test, σᵒᵢⱼnext_test, ϵⁱᵢⱼnext_test, Dⁱnext_test, Dᵒnext_test, Δt_used_test, Δt_next_test
-      end
+#       if bifurcation_criterion
+#         bifurcation_flag = true
+#         Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
+#       else
+#         Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = Snext_test, σⁱᵢⱼnext_test, σᵒᵢⱼnext_test, ϵⁱᵢⱼnext_test, Dⁱnext_test, Dᵒnext_test, Δt_used_test, Δt_next_test
+#       end
 
-    end
+#     end
 
-    tsim += Δt_used
+#     tsim += Δt_used
 
-    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
-    if save_flag
-      push!(S_vec,Snext)
-      push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
-      push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
-      push!(ϵⁱᵢⱼ_vec,ϵⁱᵢⱼnext)
-      push!(Dⁱ_vec,Dⁱnext)
-      push!(Dᵒ_vec,Dᵒnext)
-      push!(t_vec,tsim)
-    end
+#     save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
+#     if save_flag
+#       push!(S_vec,Snext)
+#       push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
+#       push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
+#       push!(ϵⁱᵢⱼ_vec,ϵⁱᵢⱼnext)
+#       push!(Dⁱ_vec,Dⁱnext)
+#       push!(Dᵒ_vec,Dᵒnext)
+#       push!(t_vec,tsim)
+#     end
 
-    i += 1
+#     i += 1
 
-    # break loop under conditions 
-    if !isnothing(time_maxiter)
-      (length(t_vec)==time_maxiter+1) && break
-    end
-    (Dⁱnext > 0.999) && break
-    (Dᵒnext > 0.999) && break
-  end
-  return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
-end
+#     # break loop under conditions 
+#     if !isnothing(time_maxiter)
+#       (length(t_vec)==time_maxiter+1) && break
+#     end
+#     (Dⁱnext > 0.999) && break
+#     (Dᵒnext > 0.999) && break
+#   end
+#   return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
+# end
 
 # find S_i and D_i automaticaly so that S_i is maximized with constraint KI(S_i,D_i)<=0
 # and solve for in and out from the beginning of the simulation with fixed D_out = D_i
-function adaptative_time_integration_2_points(r::Rheology,p::Params,σ₃,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=false)
-  #unpack
-  time_maxiter = p.solver.time_maxiter
+# function adaptative_time_integration_2_points(r::Rheology,p::Params,σ₃,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=false)
+#   #unpack
+#   time_maxiter = p.solver.time_maxiter
 
-  D_i, S_i =  get_KI_mininizer_D_on_S_range(r,1,50,σ₃ ; len=1000)
-  # fill first values
-  σᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
-  ϵᵢⱼ_i_principal = compute_ϵij(r,D_i,σᵢⱼ_i_principal)
-  σᵢⱼ_i = band_coords(σᵢⱼ_i_principal,θ)
-  ϵᵢⱼ_i = band_coords(ϵᵢⱼ_i_principal,θ)
+#   D_i, S_i =  get_KI_mininizer_D_on_S_range(r,1,50,σ₃ ; len=1000)
+#   # fill first values
+#   σᵢⱼ_i_principal = build_principal_stress_tensor(r,S_i,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint by solving non linear out of plane strain wrt σ₃₃ using Newton algorithm
+#   ϵᵢⱼ_i_principal = compute_ϵij(r,D_i,σᵢⱼ_i_principal)
+#   σᵢⱼ_i = band_coords(σᵢⱼ_i_principal,θ)
+#   ϵᵢⱼ_i = band_coords(ϵᵢⱼ_i_principal,θ)
 
-  # initialize containers
-  t_vec = Float64[tspan[1]]
-  S_vec = Float64[S_i]
-  σⁱᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
-  σᵒᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
-  ϵⁱᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
-  Dⁱ_vec = Float64[D_i]
-  Dᵒ_vec = Float64[D_i]
+#   # initialize containers
+#   t_vec = Float64[tspan[1]]
+#   S_vec = Float64[S_i]
+#   σⁱᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+#   σᵒᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+#   ϵⁱᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
+#   Dⁱ_vec = Float64[D_i]
+#   Dᵒ_vec = Float64[D_i]
 
-  # initialize values
-  tsim::Float64 = tspan[1]
-  Snext::Float64 = S_i
-  σⁱᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
-  σᵒᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
-  ϵⁱᵢⱼnext::typeof(ϵᵢⱼ_i) = ϵᵢⱼ_i
-  Dⁱnext::Float64 = D_i
-  Dᵒnext::Float64 = D_i
-  Δt_next::Float64 = Δt
-  Δt_used::Float64 = Δt
+#   # initialize values
+#   tsim::Float64 = tspan[1]
+#   Snext::Float64 = S_i
+#   σⁱᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+#   σᵒᵢⱼnext::typeof(σᵢⱼ_i) = σᵢⱼ_i
+#   ϵⁱᵢⱼnext::typeof(ϵᵢⱼ_i) = ϵᵢⱼ_i
+#   Dⁱnext::Float64 = D_i
+#   Dᵒnext::Float64 = D_i
+#   Δt_next::Float64 = Δt
+#   Δt_used::Float64 = Δt
 
-  last_tsim_printed = 0.0
-  last_tsim_saved = 0.0 
-  i = 1 # iter counter
-  while tsim < tspan[2]
-    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
-    print_flag && print_time_iteration(i,tsim)
+#   last_tsim_printed = 0.0
+#   last_tsim_saved = 0.0 
+#   i = 1 # iter counter
+#   while tsim < tspan[2]
+#     set_print_flag!(p,i,tsim,last_tsim_printed)
+#     p.flags.print_flag && print_time_iteration(i,tsim)
 
-    # solving procedure depends on the sign of S derivative
-    Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
+#     # solving procedure depends on the sign of S derivative
+#     Snext, σⁱᵢⱼnext, σᵒᵢⱼnext, ϵⁱᵢⱼnext, Dⁱnext, Dᵒnext, Δt_used, Δt_next = adaptative_solve_2_points(r,p,Snext,σ₃,σⁱᵢⱼnext,σᵒᵢⱼnext,ϵⁱᵢⱼnext,Dᵒnext,Dⁱnext,ϵ̇ⁱξη,θ,Δt_next ; damage_growth_out)
     
-    tsim += Δt_used # update simulation time
+#     tsim += Δt_used # update simulation time
 
-    # save
-    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
-    if save_flag
-      push!(S_vec,Snext)
-      push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
-      push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
-      push!(ϵⁱᵢⱼ_vec,ϵⁱᵢⱼnext)
-      push!(Dⁱ_vec,Dⁱnext)
-      push!(Dᵒ_vec,Dᵒnext)
-      push!(t_vec,tsim)
-    end
+#     # save
+#     set_save_flag!(p,i,tsim)
+#     if p.flags.save_flag
+#       push!(S_vec,Snext)
+#       push!(σⁱᵢⱼ_vec,σⁱᵢⱼnext)
+#       push!(σᵒᵢⱼ_vec,σᵒᵢⱼnext)
+#       push!(ϵⁱᵢⱼ_vec,ϵⁱᵢⱼnext)
+#       push!(Dⁱ_vec,Dⁱnext)
+#       push!(Dᵒ_vec,Dᵒnext)
+#       push!(t_vec,tsim)
+#     end
 
-    # increment iter counter
-    i += 1
+#     # increment iter counter
+#     i += 1
 
-    # break loop under conditions 
-    if !isnothing(time_maxiter)
-      (length(t_vec)==time_maxiter+1) && break
-    end
-    (Dⁱnext > 0.999) && break
-  end
-  return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
-end
+#     # break loop under conditions 
+#     if !isnothing(time_maxiter)
+#       (length(t_vec)==time_maxiter+1) && break
+#     end
+#     (Dⁱnext > 0.999) && break
+#   end
+#   return t_vec, S_vec, σⁱᵢⱼ_vec, σᵒᵢⱼ_vec, ϵⁱᵢⱼ_vec, Dⁱ_vec, Dᵒ_vec
+# end
 
 function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,tspan ; damage_growth_out=true)
-
+  flags = p.flags
   #initialize vectors
   t_vec = tspan[1]:Δt:tspan[2]
   σⁱᵢⱼ_vec = Vector{SymmetricTensor{2,3}}(undef,length(t_vec))
@@ -563,17 +581,14 @@ function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,t
   Dⁱ_vec[begin] = D_i
   Dᵒ_vec[begin] = D_i
   S_vec[begin] = S_i
-  last_tsim_printed = 0.0
-
-  # bifurcation flag :
-  bifurcation_flag = false
+  
   last_iter = 0
   for i in 2:length(t_vec)
-    print_flag, last_tsim_printed = get_print_flag(p,i,t_vec[i-1],last_tsim_printed)
-    print_flag && print_time_iteration(i,t_vec[i-1])
+    set_print_flag!(p,i,t_vec[i-1])
+    flags.print && print_time_iteration(i,t_vec[i-1])
 
     # solving procedure depends on the sign of S derivative
-    if bifurcation_flag
+    if flags.bifurcation
       S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt ; damage_growth_out)
     else
       σⁱᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], _ = solve_1_point(r,p,σⁱᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dⁱ_vec[i-1],ϵ̇11,θ,Δt)
@@ -583,9 +598,9 @@ function time_integration_2_points(r,p,S_i,σ₃,D_i,ϵ̇11,ϵ̇ⁱξη,Δt,θ,t
       S_vec[i] = σᵒᵢⱼ_principal[1,1]/σᵒᵢⱼ_principal[2,2]
     end
 
-    if !bifurcation_flag # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
-      (S_vec[i]-S_vec[i-1] <= 0) && (bifurcation_flag = true)
-      if bifurcation_flag
+    if !flags.bifurcation # activate bifurcation procedure if S starts to decrease or if the derivative is zero.
+      (S_vec[i]-S_vec[i-1] <= 0) && (flags.bifurcation = true)
+      if flags.bifurcation
         S_vec[i], σⁱᵢⱼ_vec[i], σᵒᵢⱼ_vec[i], ϵⁱᵢⱼ_vec[i], Dⁱ_vec[i], Dᵒ_vec[i], _ = solve_2_points(r,p,S_vec[i-1],σ₃,σⁱᵢⱼ_vec[i-1],σᵒᵢⱼ_vec[i-1],ϵⁱᵢⱼ_vec[i-1],Dᵒ_vec[i-1],Dⁱ_vec[i-1],ϵ̇ⁱξη,θ,Δt ; damage_growth_out)
       end
     end

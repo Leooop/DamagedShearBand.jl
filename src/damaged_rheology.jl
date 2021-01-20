@@ -372,7 +372,14 @@ end
 function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
 
   # Convert in case automatic differentiation supplies a Matrix to the function
-  (σijnext isa Matrix) && (σijnext = SymmetricTensor{2,3}(σijnext))
+  if σijnext isa Matrix
+    sym_test = σijnext - σijnext'
+    if all(.≈(0),sym_test)
+      σijnext = SymmetricTensor{2,3}(σijnext)
+    else
+      println("printed :       ",[elem.value.value for elem in sym_test])
+    end
+  end
 
   𝕀 = SymmetricTensor{2,3}(δ) # Second order identity tensor
 

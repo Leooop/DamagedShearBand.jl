@@ -47,21 +47,6 @@ end
     @test σ_back ≈ σᵢⱼ
 end
 
-@testset "get_KI_minimizer_D" begin
-    r = DSB.Rheology(D₀=0.25)
-    Dc = DSB.get_KI_mininizer_D(r,S,σ₃)
-    σᵢⱼ_Dc = DSB.build_principal_stress_tensor(r,S,σ₃,Dc)
-    KI_Dc = DSB.compute_KI(r, σᵢⱼ_Dc, Dc)
-
-    # KI after damage onset
-    KI_up = DSB.KI_from_external_load(r, S, σ₃, Dc+0.01)
-    @test KI_up > KI_Dc
-
-    # KI before damage onset
-    KI_down = DSB.KI_from_external_load(r, S, σ₃, Dc-0.01)
-    @test KI_down > KI_Dc
-end
-
 @testset "solving using given ϵ̇11. D=D₀=0 test vs elastic rheology" begin
     tspan = (0.0,1.0)
     Δt = 0.1
@@ -127,4 +112,43 @@ end
     angle_30 = DSB.get_stress_deviation_from_far_field(σᵢⱼ_rotated_30 ; offdiagtol=1e-5, compression_axis=:x)
     @test abs(angle_90) ≈ 90
     @test abs(angle_30) ≈ 30
+end
+
+@testset "get_KI_minimizer_D" begin
+    r = DSB.Rheology(D₀=0.25)
+    Dc = DSB.get_KI_minimizer_D(r,S,σ₃)
+    σᵢⱼ_Dc = DSB.build_principal_stress_tensor(r,S,σ₃,Dc)
+    KI_Dc = DSB.compute_KI(r, σᵢⱼ_Dc, Dc)
+
+    # KI after damage onset
+    KI_up = DSB.KI_from_external_load(r, S, σ₃, Dc+0.01)
+    @test KI_up > KI_Dc
+
+    # KI before damage onset
+    KI_down = DSB.KI_from_external_load(r, S, σ₃, Dc-0.01)
+    @test KI_down > KI_Dc
+end
+
+@testset "get_D_and_S_that_minimize_KI" begin
+    σ₃ = -1e6
+    r = DSB.Rheology(D₀=0.175)
+    Dc, Sc = DSB.get_KI_minimizer_D_S(r,σ₃)
+    σᵢⱼ_min = DSB.build_principal_stress_tensor(r,Sc,σ₃,Dc)
+    KI_min = DSB.compute_KI(r,σᵢⱼ_min,Dc)
+    @test abs(KI_min) < 1e-8
+
+    eps = 1e-6
+    S_more = Sc + eps
+    S_less = Sc - eps
+    D_more = Dc + eps
+    D_less = Dc - eps
+    KI_S_more = DSB.compute_KI(r,DSB.build_principal_stress_tensor(r,S_more,σ₃,Dc),Dc)
+    KI_S_less = DSB.compute_KI(r,DSB.build_principal_stress_tensor(r,S_less,σ₃,Dc),Dc)
+    KI_D_more = DSB.compute_KI(r,DSB.build_principal_stress_tensor(r,Sc,σ₃,D_more),D_more)
+    KI_D_less = DSB.compute_KI(r,DSB.build_principal_stress_tensor(r,Sc,σ₃,D_less),D_less)
+
+    @test abs(KI_S_more) > abs(KI_min)
+    @test abs(KI_S_less) > abs(KI_min)
+    @test abs(KI_D_more) > abs(KI_min)
+    @test abs(KI_S_less) > abs(KI_min)
 end
