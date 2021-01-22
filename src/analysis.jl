@@ -356,7 +356,7 @@ function initialize_state_var_D(r,p,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
   ϵⁱᵢⱼ_i = band_coords(ϵⁱᵢⱼ_i_principal,θ)
   
   # insert stress and strain componant constrained by stress continuity and strain compatibility
-  σⁱᵢⱼ_guess = insert_into(σⁱᵢⱼ_i, (σⁱᵢⱼ_i[2,2],σⁱᵢⱼ_i[1,2]), ((2,2),(1,2)))
+  σⁱᵢⱼ_guess = insert_into(σⁱᵢⱼ_i, (σᵒᵢⱼ_i[2,2],σᵒᵢⱼ_i[1,2]), ((2,2),(1,2)))
   ϵⁱᵢⱼ_guess = insert_into(ϵⁱᵢⱼ_i, ϵᵒᵢⱼ_i[1,1], (1,1))
 
   # initialize first guess for u = [ σξξ, σoop, ϵηη, ϵξη ]
