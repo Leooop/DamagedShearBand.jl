@@ -1,10 +1,11 @@
 module DamagedShearBand
 
   using Tensors
+  using StaticArrays
   import DiffResults
   import ForwardDiff
   using Optim
-
+  
   include("types.jl")
   include("utils.jl")
   include("damaged_rheology.jl")

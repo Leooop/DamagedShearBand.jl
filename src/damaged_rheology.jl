@@ -368,7 +368,60 @@ function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
 end
 
 ## 
+function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
 
+  # Convert in case automatic differentiation supplies a Matrix to the function
+  # if σ̇ᵢⱼ isa Matrix
+  #   sym_test = σ̇ᵢⱼ - σ̇ᵢⱼ'
+  #   if all(.≈(0),sym_test)
+  #     σ̇ᵢⱼ = SymmetricTensor{2,3}(σ̇ᵢⱼ)
+  #   else
+  #     println("printed :       ",[elem.value.value for elem in sym_test])
+  #   end
+  # end
+
+  𝕀 = SymmetricTensor{2,3}(δ) # Second order identity tensor
+
+  # stress at previous timestep
+  σ = (1/3)*(tr(σᵢⱼ))
+  sᵢⱼ = σᵢⱼ - σ*𝕀
+  τ = get_τ(sᵢⱼ)
+
+  # stress derivatives
+  σ̇ = (1/3)*(tr(σ̇ᵢⱼ))
+  #τ̇ = sᵢⱼ ⊡ σ̇ᵢⱼ / (2*τ)
+
+  ṡᵢⱼ = σ̇ᵢⱼ - σ̇*𝕀
+  τ̇ = get_τ(ṡᵢⱼ)
+  #@assert τ̇ == τ̇_2
+  #damage constants and derivatives
+  if r.D₀ == 0
+    A1, B1 = 0.0, 0.0
+    dA1dD, dB1dD = 0.0, 0.0
+  else
+    c1, c2, c3 = compute_c1c2c3(r,D)
+    A, B = compute_AB(r,c1,c2,c3)
+    A1, B1 = compute_A1B1(r,A,B)
+    dc1dD = compute_dc1dD(r,D)
+    dc2dD = compute_dc2dD(r,D)
+    dc3dD = compute_dc2dD(r,D)
+    dA1dD = compute_dA1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
+    dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
+  end
+
+  
+  
+  t1 = λ₁(A1,B1,σ,τ)*σ̇ᵢⱼ - ( λ₂(r,A1,B1,σ,τ)*σ̇ - (1/3)*A1*B1*τ̇ )*𝕀
+  t2 = ( dλ₁dσ(A1,B1,τ)*σ̇ + dλ₁dτ(A1,B1,σ,τ)*τ̇ )*sᵢⱼ
+  if damaged_allowed
+    t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σᵢⱼ - ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
+  else
+    t3 = zero(Tensor{2, 3})
+  end
+  ϵ̇ᵢⱼ = 1/(2r.G) * (t1 + t2 + t3)
+
+  return ϵ̇ᵢⱼ
+end
 function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
 
   # Convert in case automatic differentiation supplies a Matrix to the function

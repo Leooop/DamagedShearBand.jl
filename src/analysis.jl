@@ -160,84 +160,241 @@ end
 ## Solve related functions ##
 #############################
 
-function adaptative_time_integration(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
-  #unpack
-  time_maxiter = p.solver.time_maxiter
+# function adaptative_time_integration(r::Rheology,p::Params,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
+#   #unpack
+#   time_maxiter = p.solver.time_maxiter
 
-  # initializations
-  t_vec = Float64[tspan[1]]
-  tsim = tspan[1]
-  σᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
-  ϵᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
-  D_vec = Float64[D_i]
-  σᵢⱼnext = σᵢⱼ_i
-  ϵᵢⱼnext = ϵᵢⱼ_i
-  Dnext = D_i
-  Δt_next = Δt
-  last_tsim_printed = 0.0
-  last_tsim_saved = 0.0
-  i = 1 # iter counter
-  while tsim < tspan[2]
-    print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
-    print_flag && print_time_iteration(i,tsim)
+#   # initializations
+#   t_vec = Float64[tspan[1]]
+#   tsim = tspan[1]
+#   σᵢⱼ_vec = SymmetricTensor{2,3}[σᵢⱼ_i]
+#   ϵᵢⱼ_vec = SymmetricTensor{2,3}[ϵᵢⱼ_i]
+#   D_vec = Float64[D_i]
+#   σᵢⱼnext = σᵢⱼ_i
+#   ϵᵢⱼnext = ϵᵢⱼ_i
+#   Dnext = D_i
+#   Δt_next = Δt
+#   last_tsim_printed = 0.0
+#   last_tsim_saved = 0.0
+#   i = 1 # iter counter
+#   while tsim < tspan[2]
+#     print_flag, last_tsim_printed = get_print_flag(p,i,tsim,last_tsim_printed)
+#     print_flag && print_time_iteration(i,tsim)
 
-    σᵢⱼnext, ϵᵢⱼnext, Dnext, Δt_used, Δt_next = adaptative_Δt_solve(r,p,σᵢⱼnext,ϵᵢⱼnext,Dnext,ϵ̇11,Δt_next)
+#     σᵢⱼnext, ϵᵢⱼnext, Dnext, Δt_used, Δt_next = adaptative_Δt_solve(r,p,σᵢⱼnext,ϵᵢⱼnext,Dnext,ϵ̇11,Δt_next)
 
-    tsim += Δt_used
+#     tsim += Δt_used
 
-    save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
-    if save_flag
-      push!(σᵢⱼ_vec,σᵢⱼnext)
-      push!(ϵᵢⱼ_vec,ϵᵢⱼnext)
-      push!(D_vec,Dnext)
-      push!(t_vec,tsim)
+#     save_flag, last_tsim_saved = get_save_flag(p,i,tsim,last_tsim_saved)
+#     if save_flag
+#       push!(σᵢⱼ_vec,σᵢⱼnext)
+#       push!(ϵᵢⱼ_vec,ϵᵢⱼnext)
+#       push!(D_vec,Dnext)
+#       push!(t_vec,tsim)
+#     end
+
+#     i += 1
+#     if !isnothing(time_maxiter)
+#       (length(t_vec)==time_maxiter+1) && break
+#     end
+#   end
+#   return t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec
+# end
+
+
+
+# function adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
+#   e₀ = p.solver.e₀
+
+#   σᵢⱼnext1, ϵᵢⱼnext1, Dnext1, u1 = solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
+#   σᵢⱼmid, ϵᵢⱼmid, Dmid, umid = solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt/2)
+#   σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, u2 = solve(r,p,σᵢⱼmid,ϵᵢⱼmid,Dmid,ϵ̇11,Δt/2)
+
+#   # compute errors for each unknowns physical quantity and ponderate 
+#   eD = Dnext2-Dnext1
+#   eσ = norm((u2-u1)[1:2])
+#   eϵ = norm((u2-u1)[3])
+#   if e₀ isa Real
+#     e₀ref = e₀
+#     e_normalized = (eD, eσ/r.G, eϵ)
+#     ok_flag = all(e_normalized.<e₀)
+#     e = maximum(e_normalized)
+#   elseif e₀ isa NamedTuple
+#     e₀ref = e₀.D
+#     ok_flag = (eD<e₀.D) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
+#     e_normalized = (eD, eσ*(e₀ref/e₀.σ), eϵ*(e₀ref/e₀.ϵ))
+#     e,ind = findmax(e_normalized)
+#     ok_flag || @debug("maximum error comes from indice $(ind) of (D,σ,ϵ)")
+#   end
+
+#   if ok_flag
+#     # increse timestep
+#     Δt_next = min(Δt*abs(e₀ref/e),Δt*2)
+#     # keep best solution
+#     return σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, Δt, Δt_next
+#   else
+#     # recursively run with decreased timestep
+#     adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11, Δt*abs(e₀ref/e)) 
+#     #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
+#   end
+
+# end
+function vermeer_simple_shear_update_du_2(du,u,p,t)
+    # unpacking
+    r, mp, σ₁₁, σ₃, ϵ̇₁₂ = p
+    σ̇₁₂, σ̇ₒₒₚ, ϵ̇₁₁, ϵ̇₂₂, Ḋ = du
+    σ₁₂, σₒₒₚ, ϵ̇₁₁, ϵ₂₂, D = u
+
+    # build σ and D from u
+    σᵢⱼ = Tensor{2,3}([σ₁₁ σ₁₂ 0 ; σ₁₂ σ₃ 0 ; 0 0 σₒₒₚ])
+    KI = compute_KI(r,σᵢⱼ,D)
+    Ḋ = compute_subcrit_damage_rate(r,KI,D)
+
+    nl_u = SA[σ̇₁₂, σ̇ₒₒₚ, ϵ̇₁₁, ϵ̇₂₂]
+    if all(nl_u .== 0)
+        nl_u = SA[ϵ̇₁₂*2r.G, ϵ̇₁₂*2r.G, ϵ̇₁₂, ϵ̇₁₂]
     end
+    #result = DiffResults.JacobianResult(nl_u) no need for DiffResults with static vectors
+    for i in 1:mp.solver.newton_maxiter
+        # get residual and its gradient with respect to u
+        ∇res = ForwardDiff.jacobian(nl_u -> residual_simple_shear_2(nl_u,u,σᵢⱼ,Ḋ,p), nl_u)
+        res  = residual_simple_shear_2(nl_u,u,σᵢⱼ,Ḋ,p)
 
-    i += 1
-    if !isnothing(time_maxiter)
-      (length(t_vec)==time_maxiter+1) && break
+        #println(∇res)
+        # update u with Newton algo
+        δnl_u = - ∇res\res
+        dnl_u = nl_u + δnl_u
+        #@debug "δu = $δu"
+        #@debug "typeof(u) = $(typeof(u))"
+        #println(norm(res))
+        (norm(res) <= mp.solver.newton_abstol) && break
+
+        (i == mp.solver.newton_maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
     end
-  end
-  return t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec
+    du[:] .= [nl_u[1], nl_u[2], nl_u[3], nl_u[4], Ḋ]
+    println("du after update : ", du)
+    return du
 end
 
+function residual_simple_shear_2(du,u,σᵢⱼ,Ḋ,p)
+    # unpacking
+    r, mp, σ₁₁, σ₃, ϵ̇₁₂ = p
+    σ̇₁₂, σ̇ₒₒₚ, ϵ̇₁₁, ϵ̇₂₂ = du
+    σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
+    
 
+    # build σ̇ and ϵ̇ from du
+    #zeroTdu = zero(eltype(du))
+    σ̇ᵢⱼ = Tensor{2,3}([  0    σ̇₁₂   0  ;
+                        σ̇₁₂    0    0  ;
+                         0     0   σ̇ₒₒₚ ])
+    ϵ̇ᵢⱼ = compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
 
-function adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
-  e₀ = p.solver.e₀
+    # build residual
+    res = SA[ϵ̇₁₁ - ϵ̇ᵢⱼ[1,1],
+             ϵ̇₂₂ - ϵ̇ᵢⱼ[2,2],
+             ϵ̇ᵢⱼ[3,3],
+             ϵ̇₁₂ - ϵ̇ᵢⱼ[1,2]] * 2*r.G
+    return res
+end
 
-  σᵢⱼnext1, ϵᵢⱼnext1, Dnext1, u1 = solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt)
-  σᵢⱼmid, ϵᵢⱼmid, Dmid, umid = solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt/2)
-  σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, u2 = solve(r,p,σᵢⱼmid,ϵᵢⱼmid,Dmid,ϵ̇11,Δt/2)
+function vermeer_simple_shear_update_du!(du,u,p,t)
+    # unpacking
+    r, mp, σ₃, ϵ̇₁₂ = p
+    σ̇₁₁, σ̇₁₂, σ̇ₒₒₚ, ϵ̇₂₂, Ḋ = du
+    σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
 
-  # compute errors for each unknowns physical quantity and ponderate 
-  eD = Dnext2-Dnext1
-  eσ = norm((u2-u1)[1:2])
-  eϵ = norm((u2-u1)[3])
-  if e₀ isa Real
-    e₀ref = e₀
-    e_normalized = (eD, eσ/r.G, eϵ)
-    ok_flag = all(e_normalized.<e₀)
-    e = maximum(e_normalized)
-  elseif e₀ isa NamedTuple
-    e₀ref = e₀.D
-    ok_flag = (eD<e₀.D) && (eσ<(e₀.σ)) && (eϵ<e₀.ϵ)
-    e_normalized = (eD, eσ*(e₀ref/e₀.σ), eϵ*(e₀ref/e₀.ϵ))
-    e,ind = findmax(e_normalized)
-    ok_flag || @debug("maximum error comes from indice $(ind) of (D,σ,ϵ)")
-  end
+    # build σ and D from u
+    σᵢⱼ = Tensor{2,3}([σ₁₁ σ₁₂ 0 ; σ₁₂ σ₃ 0 ; 0 0 σₒₒₚ])
+    KI = compute_KI(r,σᵢⱼ,D)
+    Ḋ = compute_subcrit_damage_rate(r,KI,D)
 
-  if ok_flag
-    # increse timestep
-    Δt_next = min(Δt*abs(e₀ref/e),Δt*2)
-    # keep best solution
-    return σᵢⱼnext2, ϵᵢⱼnext2, Dnext2, Δt, Δt_next
-  else
-    # recursively run with decreased timestep
-    adaptative_Δt_solve(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11, Δt*abs(e₀ref/e)) 
-    #initialy Δt*abs(e₀ref/e)^2 but without the square seems to generaly require less iterations.
-  end
+    nl_u = SA[σ̇₁₁, σ̇₁₂, σ̇ₒₒₚ, ϵ̇₂₂]
+    if all(nl_u .== 0)
+        nl_u = SA[1e-6 .* rand(4)...]
+    end
+    #result = DiffResults.JacobianResult(nl_u) no need for DiffResults with static vectors
+    res0 = 0.0
+    for i in 1:mp.solver.newton_maxiter
+        # get residual and its gradient with respect to u
+        ∇res = ForwardDiff.jacobian(nl_u -> residual_simple_shear(nl_u,u,σᵢⱼ,Ḋ,p), nl_u)
+        res  = residual_simple_shear(nl_u,u,σᵢⱼ,Ḋ,p)
+        (i == 1) && (norm_res0 = norm(res))
+        #println(∇res)
+        # update u with Newton algo
+        δnl_u = - ∇res\res
+        dnl_u = nl_u + δnl_u
+        #@debug "δu = $δu"
+        #@debug "typeof(u) = $(typeof(u))"
+        #println(norm(res))
+        (norm(res) <= mp.solver.newton_abstol) && break
 
+        (i == mp.solver.newton_maxiter) && @debug("starting/ending norm res = $((norm(res0),norm(res)))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+    end
+    du[:] .= [nl_u[1], nl_u[2], nl_u[3], nl_u[4], Ḋ]
+    #println("du after update : ", du)
+    return du
+end
+
+function vermeer_simple_shear_update_du(u,p,t)
+    # unpacking
+    r, mp, σ₃, ϵ̇₁₂, du_prev = p
+    σ̇₁₁_p, σ̇₁₂_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p, Ḋ_p = du_prev
+    σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
+
+    # build σ and D from u
+    σᵢⱼ = Tensor{2,3}([σ₁₁ σ₁₂ 0 ; σ₁₂ σ₃ 0 ; 0 0 σₒₒₚ])
+    KI = compute_KI(r,σᵢⱼ,D)
+    Ḋ = compute_subcrit_damage_rate(r,KI,D)
+
+    nl_u = SA[σ̇₁₁_p, σ̇₁₂_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p]
+    if all(nl_u .== 0)
+        nl_u = SA[1e-6 .* rand(4)...]
+    end
+    #result = DiffResults.JacobianResult(nl_u) no need for DiffResults with static vectors
+    res0 = 0.0
+    for i in 1:mp.solver.newton_maxiter
+        # get residual and its gradient with respect to u
+        ∇res = ForwardDiff.jacobian(nl_u -> residual_simple_shear(nl_u,u,σᵢⱼ,Ḋ,p), nl_u)
+        res  = residual_simple_shear(nl_u,u,σᵢⱼ,Ḋ,p)
+        (i == 1) && (norm_res0 = norm(res))
+        #println(∇res)
+        # update u with Newton algo
+        δnl_u = - ∇res\res
+        dnl_u = nl_u + δnl_u
+        #@debug "δu = $δu"
+        #@debug "typeof(u) = $(typeof(u))"
+        #println(norm(res))
+        (norm(res) <= mp.solver.newton_abstol) && break
+
+        (i == mp.solver.newton_maxiter) && @debug("starting/ending norm res = $((norm(res0),norm(res)))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+    end
+    du = [nl_u[1], nl_u[2], nl_u[3], nl_u[4], Ḋ]
+    #println("du after update : ", du)
+    p[5]=du
+    return du
+end
+
+function residual_simple_shear(du,u,σᵢⱼ,Ḋ,p)
+    # unpacking
+    r, mp, σ₃, ϵ̇₁₂ = p
+    σ̇₁₁, σ̇₁₂, σ̇ₒₒₚ, ϵ̇₂₂ = du
+    σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
+    
+
+    # build σ̇ and ϵ̇ from du
+    #zeroTdu = zero(eltype(du))
+    σ̇ᵢⱼ = Tensor{2,3}([σ̇₁₁      σ̇₁₂     0  ;
+                        σ̇₁₂    0   0  ;
+                        0  0     σ̇ₒₒₚ  ])
+    ϵ̇ᵢⱼ = compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
+
+    # build residual
+    res = SA[ϵ̇ᵢⱼ[1,1],
+             ϵ̇₂₂ - ϵ̇ᵢⱼ[2,2],
+             ϵ̇ᵢⱼ[3,3],
+             ϵ̇₁₂ - ϵ̇ᵢⱼ[1,2]] * 2r.G
+    return res
 end
 
 function time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
