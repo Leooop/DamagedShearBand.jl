@@ -228,9 +228,9 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
         #@debug "δu = $δu"
         #@debug "typeof(u) = $(typeof(u))"
 
-        (norm(res) <= ps.newton_abstol) && break
+        (norm(res) <= ps.newton_abstol) && (@debug("Newton iter $i ending norm res = $(norm(res))") ; break)
         
-        (i == ps.newton_maxiter) && @debug("ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+        (i == ps.newton_maxiter) && @debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
     end
     # update strains and stresses with converged u
     # any(isnan.((S,Dⁱ,Dᵒ))) && println("(S,Dⁱ,Dᵒ) : ", (S,Dⁱ,Dᵒ))
@@ -266,6 +266,185 @@ function solve_2_points(r::Rheology,p::Params,S,σ₃,σⁱᵢⱼ,σᵒᵢⱼ,ϵ
     
 end
 
+
+function two_points_update_du(u::SVector{8,T},p,t) where T<:Real
+    # unpack
+    S, σⁱξξ, σⁱoop, ϵⁱηη, ϵⁱηη_plas, ϵⁱξη_plas, Dᵒ, Dⁱ = u
+    r = p.r
+    mp = p.mp
+    Ṡ, σ̇ⁱξξ, σ̇ⁱoop, ϵ̇ⁱηη, Ḋᵒ, Ḋⁱ = p.du
+    σ₃, ϵ̇ⁱξη, θ = p.scalars
+    flags = mp.flags
+    
+    # debug
+    (Dᵒ < r.D₀) && @show(Ḋᵒ, Dᵒ)
+
+    # use static arrays in constructors to avoid allocation
+    σᵒᵢⱼ_p = build_principal_stress_tensor(r,S,σ₃,Dᵒ ; abstol=1e-15)
+    σᵒᵢⱼ = band_coords(σᵒᵢⱼ_p,θ)
+    σⁱᵢⱼ = SymmetricTensor{2,3}(SA[σⁱξξ σᵒᵢⱼ[1,2] zero(σⁱξξ) ; σᵒᵢⱼ[1,2] σᵒᵢⱼ[2,2] zero(σⁱξξ) ; zero(σⁱξξ) zero(σⁱξξ) σⁱoop])
+
+    # compute damage rates :
+    Ḋᵒ = compute_subcrit_damage_rate(r, compute_KI(r,σᵒᵢⱼ,Dᵒ), Dᵒ)
+    Ḋⁱ = compute_subcrit_damage_rate(r, compute_KI(r,σⁱᵢⱼ,Dⁱ), Dⁱ)
+
+    #((Ḋᵒ < 0) | (Ḋⁱ < 0)) && (p.terminate_flag = true)
+    #@show Dᵒ Dⁱ
+    #@show Ḋᵒ Ḋⁱ
+    #println()
+
+    # vector to be solved by non linear iterations (scaled in order to homogenize componant magnitude)
+    du_nl = SA_F64[Ṡ*σ₃, σ̇ⁱξξ, σ̇ⁱoop, ϵ̇ⁱηη*r.G]
+    ∇res = du_nl*du_nl'
+    for i in 1:mp.solver.newton_maxiter
+        # get residual and its gradient with respect to du_nl
+        
+        # try
+        #     ∇res = ForwardDiff.jacobian(du_nl -> residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dᵒ, Ḋᵒ, Dⁱ, Ḋⁱ, p), du_nl)
+        # catch e
+        #     @warn "Jacobian calculation generates nans.\n Exiting newton iter $(i) \n"
+        #     throw(e) # comment this line to continue without erroring
+        #     flags.nan = true
+        #     break
+        # end
+        ∇res = ForwardDiff.jacobian(du_nl -> residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dᵒ, Ḋᵒ, Dⁱ, Ḋⁱ, p), du_nl)
+        res  = residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dⁱ, Ḋⁱ, Dᵒ, Ḋᵒ, p)
+
+        # newton correction term
+        δdu_nl = - ∇res\res
+        if any(isnan.(δdu_nl))
+            @warn "Solution vector update δu contains nans : $(δu).\n Exiting newton iter $(i) with residual norm of $(norm(res)) \n"
+            flags.nan = true
+            break
+        else # update if no NaNs
+            du_nl = du_nl + δdu_nl
+        end
+        #@debug "δu = $δu"
+        #@debug "typeof(u) = $(typeof(u))"
+
+        (norm(res) <= mp.solver.newton_abstol) && (@debug("Newton iter $i ending norm res = $(norm(res))") ; break)
+        
+        if i == mp.solver.newton_maxiter
+            @debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+            @debug @show(du_nl)
+        end
+    end
+    # rescale appropriate components
+    Ṡ = du_nl[1] / σ₃
+    σ̇ⁱξξ = du_nl[2]
+    σ̇ⁱoop = du_nl[3]
+    ϵ̇ⁱηη = du_nl[4]/r.G
+
+    # compute plastic strain
+    σ̇ᵒᵢⱼ = compute_rotated_stress_rate_from_band_coords_2(r,Ṡ,σ₃,σᵒᵢⱼ,Dᵒ,Ḋᵒ,θ; damaged_allowed=p.allow_Ḋᵒ)
+    σ̇ⁱᵢⱼ = SymmetricTensor{2,3}(SA[σ̇ⁱξξ σ̇ᵒᵢⱼ[1,2] zero(σ̇ⁱξξ) ; σ̇ᵒᵢⱼ[1,2] σ̇ᵒᵢⱼ[2,2] zero(σ̇ⁱξξ) ; zero(σ̇ⁱξξ) zero(σ̇ⁱξξ) σ̇ⁱoop])
+    ϵⁱᵢⱼ = compute_ϵ̇ij_2(r,Dⁱ,Ḋⁱ,σⁱᵢⱼ,σ̇ⁱᵢⱼ; damaged_allowed=true)
+    ϵⁱᵢⱼ_elast = compute_ϵ̇ij_2(r,Dⁱ,Ḋⁱ,σⁱᵢⱼ,σ̇ⁱᵢⱼ; damaged_allowed=false)
+    ϵⁱᵢⱼ_plas = ϵⁱᵢⱼ - ϵⁱᵢⱼ_elast
+
+    # build full derivatives vector 
+    du = SA_F64[Ṡ, σ̇ⁱξξ, σ̇ⁱoop, ϵ̇ⁱηη, ϵⁱᵢⱼ_plas[2,2], ϵⁱᵢⱼ_plas[1,2], Ḋᵒ, Ḋⁱ]
+
+    (p.du isa Vector) && (p.du .= du)
+    (p.du isa SVector) && (p.du = du)
+    return du
+end
+
+function two_points_update_du(u::SVector{6,T},p,t) where T<:Real
+    # unpack
+    S, σⁱξξ, σⁱoop, ϵⁱηη, Dᵒ, Dⁱ = u
+    r = p.r
+    mp = p.mp
+    Ṡ, σ̇ⁱξξ, σ̇ⁱoop, ϵ̇ⁱηη, Ḋᵒ, Ḋⁱ = p.du
+    σ₃, ϵ̇ⁱξη, θ = p.scalars
+    flags = mp.flags
+    
+    # debug
+    (Dᵒ < r.D₀) && @show(Ḋᵒ, Dᵒ)
+
+    # use static arrays in constructors to avoid allocation
+    σᵒᵢⱼ_p = build_principal_stress_tensor(r,S,σ₃,Dᵒ ; abstol=1e-15)
+    σᵒᵢⱼ = band_coords(σᵒᵢⱼ_p,θ)
+    σⁱᵢⱼ = SymmetricTensor{2,3}(SA[σⁱξξ σᵒᵢⱼ[1,2] zero(σⁱξξ) ; σᵒᵢⱼ[1,2] σᵒᵢⱼ[2,2] zero(σⁱξξ) ; zero(σⁱξξ) zero(σⁱξξ) σⁱoop])
+
+    # compute damage rates :
+    Ḋᵒ = compute_subcrit_damage_rate(r, compute_KI(r,σᵒᵢⱼ,Dᵒ), Dᵒ)
+    Ḋⁱ = compute_subcrit_damage_rate(r, compute_KI(r,σⁱᵢⱼ,Dⁱ), Dⁱ)
+
+    ((Ḋᵒ < 0) | (Ḋⁱ < 0)) && (p.terminate_flag = true)
+    #@show Dᵒ Dⁱ
+    #@show Ḋᵒ Ḋⁱ
+    #println()
+
+    # vector to be solved by non linear iterations (scaled in order to homogenize componant magnitude)
+    du_nl = SA_F64[Ṡ*σ₃, σ̇ⁱξξ, σ̇ⁱoop, ϵ̇ⁱηη*r.G]
+    ∇res = du_nl*du_nl'
+    for i in 1:mp.solver.newton_maxiter
+        # get residual and its gradient with respect to du_nl
+        
+        # try
+        #     ∇res = ForwardDiff.jacobian(du_nl -> residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dᵒ, Ḋᵒ, Dⁱ, Ḋⁱ, p), du_nl)
+        # catch e
+        #     @warn "Jacobian calculation generates nans.\n Exiting newton iter $(i) \n"
+        #     throw(e) # comment this line to continue without erroring
+        #     flags.nan = true
+        #     break
+        # end
+        ∇res = ForwardDiff.jacobian(du_nl -> residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dᵒ, Ḋᵒ, Dⁱ, Ḋⁱ, p), du_nl)
+        res  = residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dⁱ, Ḋⁱ, Dᵒ, Ḋᵒ, p)
+
+        # newton correction term
+        δdu_nl = - ∇res\res
+        if any(isnan.(δdu_nl))
+            @warn "Solution vector update δu contains nans : $(δu).\n Exiting newton iter $(i) with residual norm of $(norm(res)) \n"
+            flags.nan = true
+            break
+        else # update if no NaNs
+            du_nl = du_nl + δdu_nl
+        end
+        #@debug "δu = $δu"
+        #@debug "typeof(u) = $(typeof(u))"
+
+        (norm(res) <= mp.solver.newton_abstol) && (@debug("Newton iter $i ending norm res = $(norm(res))") ; break)
+        
+        if i == mp.solver.newton_maxiter
+            @debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+            @debug @show(du_nl)
+        end
+    end
+    du = SA_F64[du_nl[1]/σ₃, du_nl[2], du_nl[3], du_nl[4]/r.G, Ḋᵒ, Ḋⁱ]
+
+    (p.du isa Vector) && (p.du .= du)
+    (p.du isa SVector) && (p.du = du)
+    return du
+end
+
+function residual_2_points_2(u, σᵒᵢⱼ, σⁱᵢⱼ, Dᵒ, Ḋᵒ, Dⁱ, Ḋⁱ, p)
+    Ṡ, σ̇ⁱξξ, σ̇ⁱoop, ϵ̇ⁱηη = u
+    σ₃, ϵ̇ⁱξη, θ = p.scalars
+    r = p.r
+
+    # rescale appropriated components_tuple
+    Ṡ = Ṡ/σ₃
+    ϵ̇ⁱηη = ϵ̇ⁱηη/r.G
+
+    # state out
+    σ̇ᵒᵢⱼ = compute_rotated_stress_rate_from_band_coords_2(r,Ṡ,σ₃,σᵒᵢⱼ,Dᵒ,Ḋᵒ,θ; damaged_allowed=p.allow_Ḋᵒ)
+    ϵ̇ᵒᵢⱼ = compute_ϵ̇ij_2(r,Dᵒ,Ḋᵒ,σᵒᵢⱼ,σ̇ᵒᵢⱼ; damaged_allowed=p.allow_Ḋᵒ)
+
+    # state in
+    σ̇ⁱᵢⱼ = SymmetricTensor{2,3}(SA[σ̇ⁱξξ σ̇ᵒᵢⱼ[1,2] zero(σ̇ⁱξξ) ; σ̇ᵒᵢⱼ[1,2] σ̇ᵒᵢⱼ[2,2] zero(σ̇ⁱξξ) ; zero(σ̇ⁱξξ) zero(σ̇ⁱξξ) σ̇ⁱoop])
+    #σ̇ⁱᵢⱼ = SymmetricTensor{typeof(σ̇ⁱξξ),2,3}(SA[σ̇ⁱξξ σ̇ᵒᵢⱼ[1,2] 0 ; σ̇ᵒᵢⱼ[1,2] σ̇ᵒᵢⱼ[2,2] 0 ; 0 0 σ̇ⁱoop])
+    ϵ̇ⁱᵢⱼ = compute_ϵ̇ij_2(r,Dⁱ,Ḋⁱ,σⁱᵢⱼ,σ̇ⁱᵢⱼ; damaged_allowed=true)
+    
+    res = SA[ϵ̇ᵒᵢⱼ[1,1] - ϵ̇ⁱᵢⱼ[1,1],
+             ϵ̇ⁱηη - ϵ̇ⁱᵢⱼ[2,2],
+             -ϵ̇ⁱᵢⱼ[3,3],
+             ϵ̇ⁱξη - ϵ̇ⁱᵢⱼ[1,2]]
+
+    return res
+end
+
 function residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u ; damage_growth_out=true)
 
     Ṡ, σ̇ᵒᵢⱼ, σ̇ⁱᵢⱼ, ϵ̇ⁱᵢⱼ = compute_stress_strain_derivatives_from_u(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢⱼ,ϵ̇ⁱξη,Δt,θ,u; damage_growth_out)
@@ -273,7 +452,7 @@ function residual_2_points(r,S,σ₃,Dⁱ,Dᵒ,ϵⁱᵢⱼ,σⁱᵢⱼ,σᵒᵢ�
 
     ϵ̇ⁱᵢⱼ_analytical, _ = compute_ϵ̇ij(r,Dⁱ,σⁱᵢⱼ,σⁱᵢⱼnext,Δt ; damaged_allowed=true)
     Δϵ̇ⁱᵢⱼ = ϵ̇ⁱᵢⱼ_analytical - ϵ̇ⁱᵢⱼ
-    res = Vec(Δϵ̇ⁱᵢⱼ[1,1], Δϵ̇ⁱᵢⱼ[2,2], Δϵ̇ⁱᵢⱼ[3,3], Δϵ̇ⁱᵢⱼ[1,2])
+    res = Vec(Δϵ̇ⁱᵢⱼ[1,1]* 2r.G, Δϵ̇ⁱᵢⱼ[2,2]* 2r.G, Δϵ̇ⁱᵢⱼ[3,3]* 2r.G, Δϵ̇ⁱᵢⱼ[1,2]* 2r.G)
     return res
 end
 
@@ -332,11 +511,18 @@ function compute_rotated_stress_rate_from_band_coords(r,Ṡ,σ₃,σᵢⱼ_band,
     return σ̇ᵢⱼ_band
 end
 
+function compute_rotated_stress_rate_from_band_coords_2(r,Ṡ,σ₃,σᵢⱼ_band,D,Ḋ,θ; damaged_allowed=true)
+    σ̇ᵢⱼ_band = compute_rotated_stress_rate_guess(r,Ṡ,σ₃,θ)
+    #any(isnan.(σ̇ᵢⱼ_band)) && @error("isnan here !") 
+    σ̇ᵢⱼ_band = set_plane_strain_oop_stress_rate_2(r,σᵢⱼ_band,σ̇ᵢⱼ_band,D,Ḋ ; abstol=1e-16, maxiter=100, damaged_allowed)
+    return σ̇ᵢⱼ_band
+end
+
 function compute_rotated_stress_rate_guess(r,Ṡ,σ₃,θ)
     if isnan(Ṡ) 
         throw(@error("isnan here !"))
     end
-    σ̇ᵢⱼ_principal = SymmetricTensor{2,3}([Ṡ*σ₃ 0 0 ; 0 0 0 ; 0 0 r.ν*Ṡ*σ₃])
+    σ̇ᵢⱼ_principal = SymmetricTensor{2,3}(SA[Ṡ*σ₃ 0 0 ; 0 0 0 ; 0 0 r.ν*Ṡ*σ₃])
     σ̇ᵢⱼ_band = band_coords(σ̇ᵢⱼ_principal,θ)
     return σ̇ᵢⱼ_band
 end

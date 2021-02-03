@@ -87,4 +87,15 @@ struct Params{T1,T2,T3,T4,TI,TE}
 end
 Params(s::SolverParams,o::OutputParams) = Params(s,o,Flags())
 Params(o::OutputParams,s::SolverParams) = Params(s,o,Flags())
+Params() = Params(SolverParams(),OutputParams(),Flags())
+
+@kwdef mutable struct DiffEqParams{R<:Rheology,P<:Params,DU<:AbstractVector{<:Real},A<:AbstractVector{<:Real}}
+  r::R = Rheology()
+  mp::P = Params()
+  du::DU = nothing
+  scalars::A = nothing
+  allow_Ḋᵒ::Bool = true
+  terminate_flag::Bool = false
+end
+
 # Model type ? 2points, 1point

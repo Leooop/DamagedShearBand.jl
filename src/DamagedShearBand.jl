@@ -2,17 +2,15 @@ module DamagedShearBand
 
   using Tensors
   using StaticArrays
-  import DiffResults
-  import ForwardDiff
+  using ForwardDiff
   using Optim
   
   include("types.jl")
   include("utils.jl")
   include("damaged_rheology.jl")
-  include("integrators.jl")
-  include("solve.jl")
-  include("analysis.jl")
+  include("analysis/analysis.jl")
   include("simulations_helpers.jl")
+  include("integrators.jl")
 
   #export Rheology
   #export set_plane_strain_oop_stress, get_damage_onset

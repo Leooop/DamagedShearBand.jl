@@ -16,6 +16,9 @@ function compute_c1(r,D)
   @assert α > 0
 
   if r.D₀>0
+    isnan(D) && error("D is NaN")
+    isnan(r.D₀) && error("r.D₀ is NaN")
+    ((D/r.D₀) < 1) && println("D = $D & D₀ = $(r.D₀)")
     @assert (D/r.D₀) >= 1
     return sqrt(1-α^2)/(π*α^(3/2)*((D/r.D₀)^(1/3) - 1 + r.β/α)^(3/2))
   elseif (r.D₀==0) & (D==0)
@@ -77,7 +80,7 @@ function compute_b2(r::Rheology,A1,Γ)
   return (1/Γ)*(A1^2/2 + (3*(1-2r.ν))/(2*(1+r.ν)))
 end
 
-function get_τ(tensor::AbstractTensor ; input=:s)
+function get_τ(tensor::AbstractArray ; input=:s)
   (input == :s) && (return sqrt(0.5 * tensor ⊡ tensor))
   if input == :σ
     s = dev(tensor)
@@ -100,12 +103,12 @@ function compute_KI(r::Rheology,σ,τ,D)
   return (A*σ + B*τ) * sqrt(π*r.a)
 end
 
-function compute_KI(d::Rheology,σij,D)
-  A, B = compute_AB(d,D)
+function compute_KI(r::Rheology,σij::SymmetricTensor,D)
+  A, B = compute_AB(r,D)
   p = 1/3 * tr(σij) # trial pressure, negative in compression
   sij = dev(σij) # trial deviatoric stress
   τ = get_τ(sij)
-  return (A*p + B*τ) * sqrt(π*d.a)
+  return (A*p + B*τ) * sqrt(π*r.a)
 end
 
 function compute_Γ(r::Rheology,A₁,B₁)
@@ -212,14 +215,15 @@ function compute_dDdl(r::Rheology,D)
   return (3*D^(2/3)*r.D₀^(1/3))/(cosd(r.ψ)*r.a)
 end
 
-function compute_subcrit_damage_rate(r::Rheology, KI, D)
+function compute_subcrit_damage_rate(r::Rheology, KI, D ; vmax = :l̇₀)
   ((KI <= 0) || (D >= 1)) && (return 0.0)
   ρ = 2700 ##### TODO better
   Vs = sqrt(r.G/ρ)
   Vr = Vs * (0.862 + 1.14r.ν)/(1 + r.ν)
 
   dDdl = compute_dDdl(r,D) # damage derivative wrt crack length
-  dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),Vr)  # cracks growth rate
+  dlmax = (vmax == :l̇₀) ? r.l̇₀ : Vr
+  dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),dlmax)  #Vr cracks growth rate
   #@debug dDdl * dldt
   @assert dDdl * dldt >= 0
   return dDdl * dldt
@@ -371,14 +375,14 @@ end
 function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
 
   # Convert in case automatic differentiation supplies a Matrix to the function
-  # if σ̇ᵢⱼ isa Matrix
-  #   sym_test = σ̇ᵢⱼ - σ̇ᵢⱼ'
-  #   if all(.≈(0),sym_test)
-  #     σ̇ᵢⱼ = SymmetricTensor{2,3}(σ̇ᵢⱼ)
-  #   else
-  #     println("printed :       ",[elem.value.value for elem in sym_test])
-  #   end
-  # end
+  if σ̇ᵢⱼ isa Matrix
+    sym_test = σ̇ᵢⱼ - σ̇ᵢⱼ'
+    if all(.≈(0),sym_test)
+      σ̇ᵢⱼ = SymmetricTensor{2,3}(σ̇ᵢⱼ)
+    else
+      println("printed :       ",[elem.value.value for elem in sym_test])
+    end
+  end
 
   𝕀 = SymmetricTensor{2,3}(δ) # Second order identity tensor
 
@@ -389,10 +393,11 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
 
   # stress derivatives
   σ̇ = (1/3)*(tr(σ̇ᵢⱼ))
-  #τ̇ = sᵢⱼ ⊡ σ̇ᵢⱼ / (2*τ)
+  τ̇ = sᵢⱼ ⊡ σ̇ᵢⱼ / (2*τ)
 
-  ṡᵢⱼ = σ̇ᵢⱼ - σ̇*𝕀
-  τ̇ = get_τ(ṡᵢⱼ)
+  #ṡᵢⱼ = σ̇ᵢⱼ - σ̇*𝕀
+  #τ̇ = get_τ(ṡᵢⱼ)
+
   #@assert τ̇ == τ̇_2
   #damage constants and derivatives
   if r.D₀ == 0
@@ -420,7 +425,7 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
   end
   ϵ̇ᵢⱼ = 1/(2r.G) * (t1 + t2 + t3)
 
-  return ϵ̇ᵢⱼ
+  return convert(SymmetricTensor{2,3,eltype(ϵ̇ᵢⱼ)},ϵ̇ᵢⱼ)
 end
 function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
 
@@ -444,7 +449,10 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
   # stress derivatives
   σ̇ij = (σijnext-σij)/Δt
   σ̇ = (1/3)*(tr(σ̇ij))
+  ṡᵢⱼ = σ̇ij - σ̇*𝕀
+  #τ̇_2 = get_τ(ṡᵢⱼ)
   τ̇ = sij ⊡ σ̇ij / (2*τ)
+  #@show(τ̇,τ̇_i)
 
   # initialize damage rate
   Ḋ = 0.0

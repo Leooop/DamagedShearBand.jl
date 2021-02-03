@@ -1,5 +1,6 @@
 using DamagedShearBand; const DSB = DamagedShearBand
 using Tensors
+using StaticArrays
 using Test
 
 # Data :
@@ -152,4 +153,72 @@ end
     @test abs(KI_S_less) > abs(KI_min)
     @test abs(KI_D_more) > abs(KI_min)
     @test abs(KI_S_less) > abs(KI_min)
+end
+
+@testset "initialize stresses and strains from D_in and D_out" begin
+    # parameters initialization
+    σ₃ = -1e6
+    S_i = 1.0
+    Dⁱ = 0.5
+    Dᵒ = 0.4
+    θ = 60.0
+    op = DSB.OutputParams()
+    sp = DSB.SolverParams() 
+    p = DSB.Params(op,sp)
+    r = DSB.Rheology()
+
+    # tested function
+    σᵒᵢⱼ, σⁱᵢⱼ, ϵᵒᵢⱼ, ϵⁱᵢⱼ = DSB.initialize_state_var_D(r,p,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
+
+    # tests on stress continuity
+    @test σᵒᵢⱼ[1,2] ≈ σⁱᵢⱼ[1,2]
+    @test σᵒᵢⱼ[2,2] ≈ σⁱᵢⱼ[2,2]
+
+    # test on strain compatibility
+    @test ϵᵒᵢⱼ[1,1] ≈ ϵⁱᵢⱼ[1,1]
+
+    #test that epsilon oop is zero
+    @test ϵᵒᵢⱼ[3,3] ≈ 0
+    @test ϵⁱᵢⱼ[3,3] ≈ 0
+
+    # test that functional form of epsilon applied to sigma gives plane strain
+    ϵ_out = DSB.compute_ϵij(r,Dᵒ,σᵒᵢⱼ)
+    ϵ_in = DSB.compute_ϵij(r,Dⁱ,σⁱᵢⱼ)
+    abstol = 1e-15
+    @test abs(ϵ_out[3,3]) < abstol*abs(ϵ_out[1,1])
+    @test abs(ϵ_in[3,3]) < abstol*abs(ϵ_in[1,1])
+    @test all(i -> i < abstol, abs.(ϵ_out .- ϵᵒᵢⱼ)) == true
+    @test all(i -> i < abstol, abs.(ϵ_in .- ϵⁱᵢⱼ)) == true
+end
+
+@testset "residual function DiffEq form" begin
+    # parameters initialization
+    σ₃ = -1e6
+    S_i = 1.0
+    Dⁱ = 0.5
+    Dᵒ = 0.4
+    θ = 60.0
+    ϵ̇ⁱξη = 0.0
+    op = DSB.OutputParams()
+    sp = DSB.SolverParams() 
+    mp = DSB.Params(op,sp)
+    r = DSB.Rheology()
+
+    # parameters
+    p = DSB.DiffEqParams(r = r,
+                    mp = mp,
+                    du = fill(ϵ̇ⁱξη,6),
+                    scalars = SA[σ₃, ϵ̇ⁱξη, θ],
+                    allow_Ḋᵒ = true)
+    σᵒᵢⱼ, σⁱᵢⱼ, ϵᵒᵢⱼ, ϵⁱᵢⱼ = DSB.initialize_state_var_D(r,mp,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
+    u0 = SA_F64[S_i, σⁱᵢⱼ[1,1], σⁱᵢⱼ[3,3], ϵⁱᵢⱼ[2,2], Dᵒ, Dⁱ]
+    du_nl = SA_F64[0.0, 0.0, 0.0, 0.0]
+
+    KIᵒ = DSB.compute_KI(r,σᵒᵢⱼ,Dᵒ)
+    KIⁱ = DSB.compute_KI(r,σⁱᵢⱼ,Dⁱ)
+    Ḋᵒ = DSB.compute_subcrit_damage_rate(r, KIᵒ, Dᵒ)
+    Ḋⁱ = DSB.compute_subcrit_damage_rate(r, KIⁱ, Dⁱ)
+
+    res  = DSB.residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dⁱ, Ḋⁱ, Dᵒ, Ḋᵒ, p; damage_growth_out=p.allow_Ḋᵒ)
+    @test norm(res) ≈ 0
 end
