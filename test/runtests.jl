@@ -209,34 +209,34 @@ end
     @test all(i -> i < abstol, abs.(ϵ_in .- ϵⁱᵢⱼ)) == true
 end
 
-@testset "residual function DiffEq form" begin
-    # parameters initialization
-    σ₃ = -1e6
-    S_i = 1.0
-    Dⁱ = 0.5
-    Dᵒ = 0.4
-    θ = 60.0
-    ϵ̇ⁱξη = 0.0
-    op = DSB.OutputParams()
-    sp = DSB.SolverParams() 
-    mp = DSB.Params(op,sp)
-    r = DSB.Rheology()
+# @testset "residual function DiffEq form" begin
+#     # parameters initialization
+#     σ₃ = -1e6
+#     S_i = 1.0
+#     Dⁱ = 0.5
+#     Dᵒ = 0.4
+#     θ = 60.0
+#     ϵ̇ⁱξη = 0.0
+#     op = DSB.OutputParams()
+#     sp = DSB.SolverParams() 
+#     mp = DSB.Params(op,sp)
+#     r = DSB.Rheology()
 
-    # parameters
-    p = DSB.DiffEqParams(r = r,
-                    mp = mp,
-                    du = fill(ϵ̇ⁱξη,6),
-                    scalars = SA[σ₃, ϵ̇ⁱξη, θ],
-                    allow_Ḋᵒ = true)
-    σᵒᵢⱼ, σⁱᵢⱼ, ϵᵒᵢⱼ, ϵⁱᵢⱼ = DSB.initialize_state_var_D(r,mp,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
-    u0 = SA_F64[S_i, σⁱᵢⱼ[1,1], σⁱᵢⱼ[3,3], ϵⁱᵢⱼ[2,2], Dᵒ, Dⁱ]
-    du_nl = SA_F64[0.0, 0.0, 0.0, 0.0]
+#     # parameters
+#     p = DSB.DiffEqParams(r = r,
+#                     mp = mp,
+#                     du = fill(ϵ̇ⁱξη,6),
+#                     scalars = SA[σ₃, ϵ̇ⁱξη, θ],
+#                     allow_Ḋᵒ = true)
+#     σᵒᵢⱼ, σⁱᵢⱼ, ϵᵒᵢⱼ, ϵⁱᵢⱼ = DSB.initialize_state_var_D(r,mp,S_i,σ₃,Dⁱ,Dᵒ,θ ; coords=:band)
+#     u0 = SA_F64[S_i, σⁱᵢⱼ[1,1], σⁱᵢⱼ[3,3], ϵⁱᵢⱼ[2,2], Dᵒ, Dⁱ]
+#     du_nl = SA_F64[0.0, 0.0, 0.0, 0.0]
 
-    KIᵒ = DSB.compute_KI(r,σᵒᵢⱼ,Dᵒ)
-    KIⁱ = DSB.compute_KI(r,σⁱᵢⱼ,Dⁱ)
-    Ḋᵒ = DSB.compute_subcrit_damage_rate(r, KIᵒ, Dᵒ)
-    Ḋⁱ = DSB.compute_subcrit_damage_rate(r, KIⁱ, Dⁱ)
+#     KIᵒ = DSB.compute_KI(r,σᵒᵢⱼ,Dᵒ)
+#     KIⁱ = DSB.compute_KI(r,σⁱᵢⱼ,Dⁱ)
+#     Ḋᵒ = DSB.compute_subcrit_damage_rate(r, KIᵒ, Dᵒ)
+#     Ḋⁱ = DSB.compute_subcrit_damage_rate(r, KIⁱ, Dⁱ)
 
-    res  = DSB.residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dⁱ, Ḋⁱ, Dᵒ, Ḋᵒ, p)
-    @test norm(res) ≈ 0
-end
+#     res  = DSB.residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dⁱ, Ḋⁱ, Dᵒ, Ḋᵒ, p)
+#     @test norm(res) ≈ 0
+# end
