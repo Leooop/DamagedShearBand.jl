@@ -13,7 +13,8 @@ free_energy_convexity(r::Rheology,D) = 1/compute_Γ(r,compute_A1B1(r,D)...) > 0 
 #compute_c1(d::Damage,D) = sqrt(1-cos(d.ψ)^2)/(π*cos(d.ψ)^(3/2)*((D/d.D₀)^(1/3) - 1 + d.β/cos(d.ψ))^(3/2))
 function compute_c1(r,D)
   α = cosd(r.ψ)
-  @assert α > 0
+  #(α < 0) && (α = -α) #### careful with that
+  @assert α >= 0
 
   if r.D₀>0
     isnan(D) && error("D is NaN")
@@ -33,6 +34,7 @@ end
 
 function compute_c3(d::Rheology,D)
   α = cosd(d.ψ)
+  #(α < 0) && (α = -α) #### careful with that
   @assert α > 0
   (d.D₀ == D) && (return 0.0)
   @assert (D/d.D₀) >= 1

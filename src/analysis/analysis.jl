@@ -163,23 +163,33 @@ function principal_coords(σᵢⱼ,θ)
   return σᵢⱼ_rotated
 end
 
-function get_stress_deviation_from_far_field(σᵢⱼ ; offdiagtol=1e-5, compression_axis=:x)
+function get_stress_deviation_from_far_field(σᵢⱼ ; offdiagtol=1e-5, compression_axis=:x, shear_mode=:pure, shear_strain_sign=:positive)
+  σᵢⱼ2D = SymmetricTensor{2,2}(SA[σᵢⱼ[1,1] σᵢⱼ[1,2] ; σᵢⱼ[2,1] σᵢⱼ[2,2]])
+  if shear_mode==:simple
+    if (σᵢⱼ2D[1,1]==σᵢⱼ2D[2,2]) && (σᵢⱼ2D[1,2]==0)
+      (shear_strain_sign==:positive) && (return 45.0)
+      (shear_strain_sign==:negative) && (return -45.0)
+    end
+  end
+
   σᵢⱼ = filter_offdiagonal(σᵢⱼ ; tol=offdiagtol)
   F = eigen(σᵢⱼ[1:2,1:2])
   #any(isnan.([F.values F.vectors])) && (F = eigen(Array(σᵢⱼ)))
   ind = findall(==(minimum(F.values)),F.values)
-  σ₁_xy_direction = length(ind) == 1 ? F.vectors[:,ind] : Vec(1.0,0.0)
+  σ₁_xy_direction = length(ind) == 1 ? Vec(F.vectors[:,ind]...) : Vec(1.0,0.0)
   σ₁_far_field_direction = (compression_axis==:x) ? Vec(1.0,0.0) : Vec(0.0,1.0)
   if all(σ₁_xy_direction .≈ σ₁_far_field_direction)
-      angle = 0.0
-      else
-      angle = atand(σ₁_xy_direction[2],σ₁_xy_direction[1])
+    angle = 0.0
+  else
+    angle = atand(σ₁_xy_direction[2],σ₁_xy_direction[1]) # wrt x direction
+    (compression_axis==:y) && (angle = 90 + angle)
   end
   #(angle == 90) && (angle = zero(angle))
   (angle > 90) && (angle -= 180)
-  (angle < -90) && (angle += 180)
   return angle
 end
+
+get_stress_deviation_from_y(σᵢⱼ ; shear_mode=:pure, shear_strain_sign = :positive) = get_stress_deviation_from_far_field(σᵢⱼ ; offdiagtol=1e-5, compression_axis=:y, shear_mode, shear_strain_sign)
 
 include("solve.jl")
 include("single_point_analysis.jl")

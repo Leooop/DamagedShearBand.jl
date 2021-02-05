@@ -114,6 +114,24 @@ end
     angle_30 = DSB.get_stress_deviation_from_far_field(σᵢⱼ_rotated_30 ; offdiagtol=1e-5, compression_axis=:x)
     @test abs(angle_90) ≈ 90
     @test abs(angle_30) ≈ 30
+
+    # # from simple shear test :
+    Dᵢ, _ = DSB.get_KI_minimizer_D_S(r,σ₃)
+    σᵢⱼ0 = DSB.build_principal_stress_tensor(r,2,σ₃,Dᵢ ; abstol=1e-15) # σ1 along x
+    σᵢⱼ1 = DSB.build_principal_stress_tensor(r,0.5,σ₃,Dᵢ ; abstol=1e-15) # σ1 along y
+    σᵢⱼ2p = SymmetricTensor{2,3,Float64}(SA[σᵢⱼ0[1,1], -0.1*σᵢⱼ0[1,1], 0, σᵢⱼ0[2,2], 0, σᵢⱼ0[3,3]]) # σᵢⱼ0 with low positive shear stress
+    σᵢⱼ2n = SymmetricTensor{2,3,Float64}(SA[σᵢⱼ0[1,1], 0.1*σᵢⱼ0[1,1], 0, σᵢⱼ0[2,2], 0, σᵢⱼ0[3,3]]) # σᵢⱼ0 with low negative shear stress
+    σᵢⱼ3 = DSB.build_principal_stress_tensor(r,1,σ₃,Dᵢ ; abstol=1e-15) # hydrostatic in plane stress
+    σ_angle_0 = DSB.get_stress_deviation_from_y(σᵢⱼ0)
+    σ_angle_1 = DSB.get_stress_deviation_from_y(σᵢⱼ1)
+    σ_angle_2p = DSB.get_stress_deviation_from_y(σᵢⱼ2p)
+    σ_angle_2n = DSB.get_stress_deviation_from_y(σᵢⱼ2n)
+    σ_angle_3 = DSB.get_stress_deviation_from_y(σᵢⱼ3 ; shear_mode=:simple)
+    @test σ_angle_0 == 90 # σ1 along x
+    @test σ_angle_1 == 0 # σ1 along y
+    @test 0 < σ_angle_2p < 90 # positive trigonometric angle from σyy
+    @test -90 < σ_angle_2n < 0 # negative trigonometric angle from σyy => because the angle is expressed in [-π/2 ; π/2]
+    @test σ_angle_3 == 45 # set to 45° for hydrostatic conditions in simple shear test because it goes to this value as soon as shear terms become non zero
 end
 
 @testset "get_KI_minimizer_D" begin
@@ -219,6 +237,6 @@ end
     Ḋᵒ = DSB.compute_subcrit_damage_rate(r, KIᵒ, Dᵒ)
     Ḋⁱ = DSB.compute_subcrit_damage_rate(r, KIⁱ, Dⁱ)
 
-    res  = DSB.residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dⁱ, Ḋⁱ, Dᵒ, Ḋᵒ, p; damage_growth_out=p.allow_Ḋᵒ)
+    res  = DSB.residual_2_points_2(du_nl, σᵒᵢⱼ, σⁱᵢⱼ, Dⁱ, Ḋⁱ, Dᵒ, Ḋᵒ, p)
     @test norm(res) ≈ 0
 end

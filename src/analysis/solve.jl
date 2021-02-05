@@ -424,7 +424,7 @@ function residual_2_points_2(u, σᵒᵢⱼ, σⁱᵢⱼ, Dᵒ, Ḋᵒ, Dⁱ, D�
     σ₃, ϵ̇ⁱξη, θ = p.scalars
     r = p.r
 
-    # rescale appropriated components_tuple
+    # rescale appropriate components
     Ṡ = Ṡ/σ₃
     ϵ̇ⁱηη = ϵ̇ⁱηη/r.G
 
@@ -440,7 +440,7 @@ function residual_2_points_2(u, σᵒᵢⱼ, σⁱᵢⱼ, Dᵒ, Ḋᵒ, Dⁱ, D�
     res = SA[ϵ̇ᵒᵢⱼ[1,1] - ϵ̇ⁱᵢⱼ[1,1],
              ϵ̇ⁱηη - ϵ̇ⁱᵢⱼ[2,2],
              -ϵ̇ⁱᵢⱼ[3,3],
-             ϵ̇ⁱξη - ϵ̇ⁱᵢⱼ[1,2]]
+             ϵ̇ⁱξη - ϵ̇ⁱᵢⱼ[1,2]] / ϵ̇ⁱξη
 
     return res
 end
