@@ -27,9 +27,10 @@ function compute_c1(r,D)
   end
 end
 # Perol&Bhat2016 : 1/α  or  Harsha's notes : 1/α^2 ???
-function compute_c2(d::Rheology,D) 
+function compute_c2(d::Rheology,D)
+  α = cosd(d.ψ)
   (d.D₀==0) && (return 0.0)
-  return (sqrt(1 - cosd(d.ψ)^2)/cosd(d.ψ)^2) * (d.D₀^(2/3)/(1 - D^(2/3)))
+  return (sqrt(1 - α^2)/α^2) * (d.D₀^(2/3)/(1 - D^(2/3))) ###
 end
 
 function compute_c3(d::Rheology,D)

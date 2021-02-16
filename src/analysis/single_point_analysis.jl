@@ -18,7 +18,7 @@ function vermeer_simple_shear_update_du(u,p,t)
     Ḋ = compute_subcrit_damage_rate(r,KI,D)
 
     # solve for non linear derivatives
-    nl_u = nl_u = SA[σ̇₁₁_p, σ̇₁₂_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p] # first guess is previous iter
+    nl_u = SA[σ̇₁₁_p, σ̇₁₂_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p] # first guess is previous iter
     nl_u = nl_solve(residual_simple_shear,nl_u,u,p,σᵢⱼ,Ḋ)
 
     # build back unknown vector
@@ -27,18 +27,6 @@ function vermeer_simple_shear_update_du(u,p,t)
     p[5]=du
     
     return du
-end
-
-function compute_flaws_angle_wrt_σ1(σᵢⱼ,p)
-    _, _, _, ϵ̇₁₂, _, ψᵢ, σ1_initial_orientation = p
-    shear_strain_sign = (sign(ϵ̇₁₂) == 1) ? :positive : :negative
-    σ1_orientation = get_stress_deviation_from_y(σᵢⱼ ; shear_mode=:simple, shear_strain_sign)
-    Δσ1_orientation = σ1_orientation - σ1_initial_orientation
-    ψ_cor = ψᵢ - Δσ1_orientation
-    # ψ_cor has to be inside [-pi/2,pi/2] therefore: 
-    (ψ_cor > 90) && (ψ_cor -= 180)
-    (ψ_cor < -90) && (ψ_cor += 180)
-    return ψ_cor
 end
 
 function nl_solve(res_func,nl_u,u,p,σᵢⱼ,Ḋ)
@@ -70,12 +58,120 @@ function nl_solve(res_func,nl_u,u,p,σᵢⱼ,Ḋ)
     nl_u = setindex(nl_u_scaled,nl_u_scaled[4]/r.G, 4)
     return nl_u
 end
+
 function residual_simple_shear(du,u,σᵢⱼ,Ḋ,p)
     # unpacking
     r, mp, σ₃, ϵ̇₁₂ = @view(p[1:4])
     σ̇₁₁, σ̇₁₂, σ̇ₒₒₚ, ϵ̇₂₂ = du
     σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
     ϵ̇₂₂ = ϵ̇₂₂/r.G # rescale ϵ̇₂₂
+
+    # build σ̇ and ϵ̇ from du
+    #zeroTdu = zero(eltype(du))
+    σ̇ᵢⱼ = SymmetricTensor{2,3}([σ̇₁₁      σ̇₁₂     0.0  ;
+                        σ̇₁₂    0.0   0.0  ;
+                        0.0  0.0     σ̇ₒₒₚ  ])
+    ϵ̇ᵢⱼ = compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
+
+    # build residual
+    res = SA[ϵ̇ᵢⱼ[1,1],
+             ϵ̇₂₂ - ϵ̇ᵢⱼ[2,2],
+             ϵ̇ᵢⱼ[3,3],
+             ϵ̇₁₂ - ϵ̇ᵢⱼ[1,2]] / ϵ̇₁₂
+    return res
+end
+
+# SHEAR STRESS CONTROL
+
+function vermeer_simple_shear_sigma_update_du(u,p,t ; log_eps=false)
+    # unpacking
+    r, mp, σ₃, σ̇₁₂, du_prev = @view(p[1:5])
+    σ̇₁₁_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p, ϵ̇₁₂_p, _ = du_prev
+    σ₁₁, σₒₒₚ, ϵ₂₂, ϵ₁₂, D = u
+    # get stress tensor
+    σᵢⱼ = SymmetricTensor{2,3}(SA[σ₁₁ σ̇₁₂*t 0 ; σ̇₁₂*t σ₃ 0 ; 0 0 σₒₒₚ])
+
+    # correct flaws orientation according to stress rotation
+    if length(p) == 7
+        ψ_cor = compute_flaws_angle_wrt_σ1(σᵢⱼ,p)
+        r = Rheology(r,(ψ=ψ_cor,)) 
+    end
+
+    # compute damage growth rate
+    KI = compute_KI(r,σᵢⱼ,D)
+    #@show r.ψ KI
+    Ḋ = compute_subcrit_damage_rate(r,KI,D)
+
+    # solve for non linear derivatives
+    nl_u = SA[σ̇₁₁_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p, ϵ̇₁₂_p] # first guess is previous iter
+    nl_u = nl_solve_sigma(residual_simple_shear_sigma,nl_u,u,p,σᵢⱼ,Ḋ ; log_eps)
+
+    # build back unknown vector
+    du = SA[nl_u[1], nl_u[2], nl_u[3], nl_u[4], Ḋ]
+    #println("du after update : ", du)
+    p[5]=du
+    
+    return du
+end
+
+function nl_solve_sigma(res_func,nl_u,u,p,σᵢⱼ,Ḋ ; log_eps=true)
+    # unpack
+    r, mp, σ₃, σ̇₁₂, du_prev = @view(p[1:5])
+    # scale strain term 
+    nl_u_scaled = nl_u
+    if log_eps
+        #@show nl_u[4]
+        log_ϵ̇₁₂ = log10(sign(σ̇₁₂)*nl_u[4]) # take the log to force sign(ϵ̇₁₂) = sign(σ̇₁₂)
+        #@show logged_ϵ̇₁₂
+        # scale everything on the order of 1
+        nl_u_scaled = SA[nl_u[1]/σ̇₁₂, nl_u[2]/σ̇₁₂, nl_u[3]*r.G/σ̇₁₂, log_ϵ̇₁₂]
+    else
+        nl_u_scaled = SA[nl_u[1], nl_u[2], nl_u[3]*r.G, nl_u[4]*r.G]
+    end
+
+    if all(nl_u .== 0) # in case du_prev is initialized to zero (should be able to remove that)
+        nl_u_scaled = SA[σ̇₁₂, σ̇₁₂, σ̇₁₂, σ̇₁₂]
+    end
+    #result = DiffResults.JacobianResult(nl_u) no need for DiffResults with static vectors
+    for i in 1:mp.solver.newton_maxiter
+        # get residual and its gradient with respect to u
+        ∇res = ForwardDiff.jacobian(nl_u -> res_func(nl_u,u,σᵢⱼ,Ḋ,p ; log_eps), nl_u_scaled)
+        res  = res_func(nl_u_scaled,u,σᵢⱼ,Ḋ,p; log_eps)
+        #(i == 1) && (norm_res0 = norm(res))
+        #println(∇res)
+        # update u with Newton algo
+        δnl_u = - ∇res\res
+        nl_u_scaled = nl_u_scaled + δnl_u
+        #@debug "δu = $δu"
+        #@debug "typeof(u) = $(typeof(u))"
+        #println(norm(res))
+        (norm(res) <= mp.solver.newton_abstol) && (break) # @debug("Newton iter $i ending norm res = $(norm(res))") ;
+
+        (i == mp.solver.newton_maxiter) && @debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+    end
+    # rescale everything :
+    if log_eps
+        nl_u = SA[nl_u_scaled[1]*σ̇₁₂, nl_u_scaled[2]*σ̇₁₂, nl_u_scaled[3]*σ̇₁₂/r.G, sign(σ̇₁₂)*exp10(nl_u_scaled[4])]
+    else
+        nl_u = SA[nl_u_scaled[1], nl_u_scaled[2], nl_u_scaled[3]/r.G, nl_u_scaled[4]/r.G]
+    end
+
+    return nl_u
+end
+
+function residual_simple_shear_sigma(du,u,σᵢⱼ,Ḋ,p ; log_eps=false)
+    # unpacking
+    r, mp, σ₃, σ̇₁₂ = @view(p[1:4])
+    scaled_σ̇₁₁, scaled_σ̇ₒₒₚ, scaled_ϵ̇₂₂, scaled_ϵ̇₁₂ = du
+    σ₁₁, σₒₒₚ, ϵ₂₂, ϵ₁₂, D = u
+
+    # rescale 
+    if log_eps
+        du = SA[scaled_σ̇₁₁*σ̇₁₂, scaled_σ̇ₒₒₚ*σ̇₁₂, scaled_ϵ̇₂₂*σ̇₁₂/r.G, sign(σ̇₁₂)*exp10(scaled_ϵ̇₁₂)]
+    else
+        du = SA[scaled_σ̇₁₁, scaled_σ̇ₒₒₚ, scaled_ϵ̇₂₂/r.G, scaled_ϵ̇₁₂/r.G]
+    end
+    σ̇₁₁, σ̇ₒₒₚ, ϵ̇₂₂, ϵ̇₁₂ = du
 
     # build σ̇ and ϵ̇ from du
     #zeroTdu = zero(eltype(du))
@@ -88,8 +184,21 @@ function residual_simple_shear(du,u,σᵢⱼ,Ḋ,p)
     res = SA[ϵ̇ᵢⱼ[1,1],
              ϵ̇₂₂ - ϵ̇ᵢⱼ[2,2],
              ϵ̇ᵢⱼ[3,3],
-             ϵ̇₁₂ - ϵ̇ᵢⱼ[1,2]] / ϵ̇₁₂
+             ϵ̇₁₂ - ϵ̇ᵢⱼ[1,2]] / (σ̇₁₂/r.G)
     return res
+end
+
+
+function compute_flaws_angle_wrt_σ1(σᵢⱼ,p)
+    _, _, _, control_rate, _, ψᵢ, σ1_initial_orientation = p
+    shear_strain_sign = (control_rate > 0) ? :positive : :negative
+    σ1_orientation = get_stress_deviation_from_y(σᵢⱼ ; shear_mode=:simple, shear_strain_sign)
+    Δσ1_orientation = σ1_orientation - σ1_initial_orientation
+    ψ_cor = ψᵢ - Δσ1_orientation
+    # ψ_cor has to be inside [-pi/2,pi/2] therefore: 
+    (ψ_cor > 90) && (ψ_cor -= 180)
+    (ψ_cor < -90) && (ψ_cor += 180)
+    return ψ_cor
 end
 # function vermeer_simple_shear_update_du_2(du,u,p,t)
 #     # unpacking
