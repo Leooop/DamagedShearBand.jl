@@ -49,52 +49,52 @@ end
     @test σ_back ≈ σᵢⱼ
 end
 
-@testset "solving using given ϵ̇11. D=D₀=0 test vs elastic rheology" begin
-    tspan = (0.0,1.0)
-    Δt = 0.1
-    ϵ̇11 = -1e-5
-    r = DSB.Rheology(D₀=0.0) # object containing elastic moduli and damage parameters.
-    D_i = r.D₀
-    σ₃ = -1e6
-    S = 1
+# @testset "solving using given ϵ̇11. D=D₀=0 test vs elastic rheology" begin
+#     tspan = (0.0,1.0)
+#     Δt = 0.1
+#     ϵ̇11 = -1e-5
+#     r = DSB.Rheology(D₀=0.0) # object containing elastic moduli and damage parameters.
+#     D_i = r.D₀
+#     σ₃ = -1e6
+#     S = 1
     
-    n_iter_saved = 5000
-    n_iter_printed = 10
-    op = DSB.OutputParams(save_frequency = n_iter_saved/(tspan[2]-tspan[1]),
-                        save_period = nothing,
-                        print_frequency = n_iter_printed/(tspan[2]-tspan[1]),
-                        print_period = nothing)
+#     n_iter_saved = 5000
+#     n_iter_printed = 10
+#     op = DSB.OutputParams(save_frequency = n_iter_saved/(tspan[2]-tspan[1]),
+#                         save_period = nothing,
+#                         print_frequency = n_iter_printed/(tspan[2]-tspan[1]),
+#                         print_period = nothing)
 
-    sp = DSB.SolverParams(newton_abstol = 1e-12,
-                        newton_maxiter = 100,
-                        time_maxiter = nothing,
-                        e₀ = (D=1e-1, σ=100.0, ϵ=1e-3)) 
+#     sp = DSB.SolverParams(newton_abstol = 1e-12,
+#                         newton_maxiter = 100,
+#                         time_maxiter = nothing,
+#                         e₀ = (D=1e-1, σ=100.0, ϵ=1e-3)) 
 
-    p = DSB.Params(op,sp)
+#     p = DSB.Params(op,sp)
 
-    σᵢⱼ_i = DSB.build_principal_stress_tensor(r,S,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint
-    ϵᵢⱼ_i = DSB.compute_ϵij(r,D_i,σᵢⱼ_i)
-    t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
+#     σᵢⱼ_i = DSB.build_principal_stress_tensor(r,S,σ₃,D_i ; abstol=1e-15) # takes care of the plane strain constraint
+#     ϵᵢⱼ_i = DSB.compute_ϵij(r,D_i,σᵢⱼ_i)
+#     t_vec, σᵢⱼ_vec, ϵᵢⱼ_vec, D_vec = DSB.time_integration(r,p,σᵢⱼ_i,ϵᵢⱼ_i,D_i,ϵ̇11,Δt,tspan)
 
-    Ce = DSB.get_elastic_stiffness_tensor(r)
-    σᵢⱼ_vec_elast = Ref(Ce) .⊡ ϵᵢⱼ_vec
+#     Ce = DSB.get_elastic_stiffness_tensor(r)
+#     σᵢⱼ_vec_elast = Ref(Ce) .⊡ ϵᵢⱼ_vec
 
-    @test all([σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_elast])
-    @test all([σᵢⱼ[2,2] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[2,2] for σᵢⱼ in σᵢⱼ_vec_elast])
-    @test all([σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec_elast])
-    @test all([σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec_elast])
-    @test all([σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec_elast])
-    @test all([σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec_elast])
+#     @test all([σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,1] for σᵢⱼ in σᵢⱼ_vec_elast])
+#     @test all([σᵢⱼ[2,2] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[2,2] for σᵢⱼ in σᵢⱼ_vec_elast])
+#     @test all([σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[3,3] for σᵢⱼ in σᵢⱼ_vec_elast])
+#     @test all([σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,2] for σᵢⱼ in σᵢⱼ_vec_elast])
+#     @test all([σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[1,3] for σᵢⱼ in σᵢⱼ_vec_elast])
+#     @test all([σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec] .≈ [σᵢⱼ[2,3] for σᵢⱼ in σᵢⱼ_vec_elast])
 
     
-    # check tangent modulus along xx (σxx/ϵxx)
-    Emod = DSB.E_from_Gν(r.G,r.ν)
-    tan_mod_elast_model = (σᵢⱼ_vec_elast[end][1,1]-σᵢⱼ_vec_elast[1][1,1]) / (ϵᵢⱼ_vec[end][1,1]-ϵᵢⱼ_vec[1][1,1])
-    tan_mod_Dat0_model = (σᵢⱼ_vec[end][1,1]-σᵢⱼ_vec_elast[1][1,1]) / (ϵᵢⱼ_vec[end][1,1]-ϵᵢⱼ_vec[1][1,1])
-    tan_mod_theoretical = Emod/(1-r.ν^2)
-    @test abs(tan_mod_Dat0_model-tan_mod_theoretical) < 1e-2
-    @test abs(tan_mod_elast_model-tan_mod_theoretical) < 1e-2
-end
+#     # check tangent modulus along xx (σxx/ϵxx)
+#     Emod = DSB.E_from_Gν(r.G,r.ν)
+#     tan_mod_elast_model = (σᵢⱼ_vec_elast[end][1,1]-σᵢⱼ_vec_elast[1][1,1]) / (ϵᵢⱼ_vec[end][1,1]-ϵᵢⱼ_vec[1][1,1])
+#     tan_mod_Dat0_model = (σᵢⱼ_vec[end][1,1]-σᵢⱼ_vec_elast[1][1,1]) / (ϵᵢⱼ_vec[end][1,1]-ϵᵢⱼ_vec[1][1,1])
+#     tan_mod_theoretical = Emod/(1-r.ν^2)
+#     @test abs(tan_mod_Dat0_model-tan_mod_theoretical) < 1e-2
+#     @test abs(tan_mod_elast_model-tan_mod_theoretical) < 1e-2
+# end
 
 @testset "from principal stress rate to band orientation" begin
     θ = 60.0

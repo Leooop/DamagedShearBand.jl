@@ -325,8 +325,8 @@ function two_points_update_du(u::SVector{8,T},p,t) where T<:Real
         (norm(res) <= mp.solver.newton_abstol) && (@debug("Newton iter $i ending norm res = $(norm(res))") ; break)
         
         if i == mp.solver.newton_maxiter
-            @debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
-            @debug @show(du_nl)
+            #@debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+            #@debug @show(du_nl)
         end
     end
     # rescale appropriate components
@@ -408,8 +408,8 @@ function two_points_update_du(u::SVector{6,T},p,t) where T<:Real
         (norm(res) <= mp.solver.newton_abstol) && (@debug("Newton iter $i ending norm res = $(norm(res))") ; break)
         
         if i == mp.solver.newton_maxiter
-            @debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
-            @debug @show(du_nl)
+            #@debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
+            #@debug @show(du_nl)
         end
     end
     du = SA_F64[du_nl[1]/σ₃, du_nl[2], du_nl[3], du_nl[4]/r.G, Ḋᵒ, Ḋⁱ]

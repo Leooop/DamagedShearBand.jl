@@ -1,7 +1,7 @@
 function vermeer_simple_shear_update_du(u,p,t)
     # unpacking
     r, mp, σ₃, ϵ̇₁₂, du_prev = @view(p[1:5])
-    σ̇₁₁_p, σ̇₁₂_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p, _ = du_prev
+    σ̇₁₁_prev, σ̇₁₂_prev, σ̇ₒₒₚ_prev, ϵ̇₂₂_prev, _ = du_prev
     σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
     # get stress tensor
     σᵢⱼ = SymmetricTensor{2,3}(SA[σ₁₁ σ₁₂ 0 ; σ₁₂ σ₃ 0 ; 0 0 σₒₒₚ])
@@ -15,10 +15,10 @@ function vermeer_simple_shear_update_du(u,p,t)
     # compute damage growth rate
     KI = compute_KI(r,σᵢⱼ,D)
     #@show r.ψ KI
-    Ḋ = compute_subcrit_damage_rate(r,KI,D)
+    Ḋ = compute_subcrit_damage_rate(r,KI,D ; vmax=:l̇₀)
 
     # solve for non linear derivatives
-    nl_u = SA[σ̇₁₁_p, σ̇₁₂_p, σ̇ₒₒₚ_p, ϵ̇₂₂_p] # first guess is previous iter
+    nl_u = SA[σ̇₁₁_prev, σ̇₁₂_prev, σ̇ₒₒₚ_prev, ϵ̇₂₂_prev] # first guess is previous iter
     nl_u = nl_solve(residual_simple_shear,nl_u,u,p,σᵢⱼ,Ḋ)
 
     # build back unknown vector
@@ -49,7 +49,9 @@ function nl_solve(res_func,nl_u,u,p,σᵢⱼ,Ḋ)
         nl_u_scaled = nl_u_scaled + δnl_u
         #@debug "δu = $δu"
         #@debug "typeof(u) = $(typeof(u))"
-        #println(norm(res))
+        if (norm(res) <= mp.solver.newton_abstol) && (abs(res[3]) > 1e-15) #test plain strain condition
+            @show(norm(res),res[3])
+        end
         (norm(res) <= mp.solver.newton_abstol) && (break) # @debug("Newton iter $i ending norm res = $(norm(res))") ;
 
         (i == mp.solver.newton_maxiter) && @debug("Newton maxiter ending norm res = $(norm(res))")#("max newton iteration reached ($i), residual still higher than abstol with $(norm(res))")
@@ -63,14 +65,14 @@ function residual_simple_shear(du,u,σᵢⱼ,Ḋ,p)
     # unpacking
     r, mp, σ₃, ϵ̇₁₂ = @view(p[1:4])
     σ̇₁₁, σ̇₁₂, σ̇ₒₒₚ, ϵ̇₂₂ = du
-    σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
+    _, _, _, _, D = u
     ϵ̇₂₂ = ϵ̇₂₂/r.G # rescale ϵ̇₂₂
 
     # build σ̇ and ϵ̇ from du
     #zeroTdu = zero(eltype(du))
-    σ̇ᵢⱼ = SymmetricTensor{2,3}([σ̇₁₁      σ̇₁₂     0.0  ;
-                        σ̇₁₂    0.0   0.0  ;
-                        0.0  0.0     σ̇ₒₒₚ  ])
+    σ̇ᵢⱼ = SymmetricTensor{2,3}([ σ̇₁₁    σ̇₁₂   0.0  ;
+                                 σ̇₁₂    0.0   0.0  ;
+                                 0.0    0.0   σ̇ₒₒₚ ])
     ϵ̇ᵢⱼ = compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
 
     # build residual

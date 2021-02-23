@@ -72,6 +72,11 @@ function set_plane_strain_oop_stress_rate_2(r,σᵢⱼ,σ̇ᵢⱼ,D,Ḋ ; abstol
   return σ̇ᵢⱼ
 end
 
+# function get_strain_from_stress(r,D,σᵢⱼ)
+#   ϵᵢⱼ = compute_ϵij(r,D,σᵢⱼ)
+
+# end
+
 function get_damage_onset(r::Rheology,σ₃,D)
   func_to_minimize = S -> abs(zero_at_damage_onset(r,first(S),σ₃,D)) #optimize function needs an array of variables
   Sc = optimize(func_to_minimize, [3.0],method=LBFGS(),autodiff = :forward).minimizer[1]

@@ -34,12 +34,14 @@ function Rheology(r::Rheology, kw::NamedTuple)
                     A = values_dict[:A])
 end
 
+Base.Broadcast.broadcastable(r::Rheology) = Ref(r)
+
 function Base.show(io::IO, ::MIME"text/plain", r::Rheology)
   print(io, "Rheology instance with fields :\n",
   "\t├── G (shear modulus)                             : $(r.G)\n",
   "\t├── ν (poisson ratio)                             : $(r.ν)\n",
   "\t├── μ (flaws friction coefficient)                : $(r.μ)\n",
-  "\t├── β (correction factor)                         : $(r.μ)\n",
+  "\t├── β (correction factor)                         : $(r.β)\n",
   "\t├── K₁c (fracture toughness)                      : $(r.K₁c)\n",
   "\t├── a (flaws radius)                              : $(r.a)\n",
   "\t├── ψ (flaws angle wrt σ₁ in degree)              : $(r.ψ)\n",
