@@ -150,6 +150,11 @@ function build_principal_stress_tensor(r,S,σ₃,D ; abstol=1e-15)
   return set_plane_strain_oop_stress(σᵢⱼ_guess,r,D ; abstol)
 end
 
+function build_stress_tensor(r,σxx,σyy,σxy,D ; abstol=1e-15)
+  σᵢⱼ_guess = SymmetricTensor{2,3}(SA[σxx σxy 0 ; σxy σyy 0 ; 0 0 r.ν*(σxx+σyy)])
+  return set_plane_strain_oop_stress(σᵢⱼ_guess,r,D ; abstol)
+end
+
 function band_coords(σᵢⱼ,θ)
   Q = Tensor{2,2}([sind(θ) cosd(θ) ; -cosd(θ) sind(θ)])
   σ2D = SymmetricTensor{2,2,eltype(σᵢⱼ)}(SA[σᵢⱼ[1,1] σᵢⱼ[1,2] ; σᵢⱼ[1,2] σᵢⱼ[2,2]])

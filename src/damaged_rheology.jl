@@ -244,6 +244,20 @@ function compute_subcrit_damage_rate(r::Rheology, KI, D ; vmax = :l̇₀)
   return dDdl * dldt
 end
 
+### TEST ###
+function compute_subcrit_damage_rate_dynamic(r::Rheology, KI, D ; vmax = :l̇₀)
+  ((KI <= r.K₁c) || (D >= 1)) && (return 0.0)
+  ρ = 2700 ##### TODO better
+  Vs = sqrt(r.G/ρ)
+  Vr = Vs * (0.862 + 1.14r.ν)/(1 + r.ν)
+
+  dDdl = compute_dDdl(r,D) # damage derivative wrt crack length
+  dldt = Vr  #Vr cracks growth rate
+  #@debug dlmax
+  @assert dDdl * dldt >= 0
+  return dDdl * dldt
+end
+
 function compute_free_energy(r,D,ϵij)
   G = r.G
   ν = r.ν
@@ -387,12 +401,13 @@ function compute_damaged_stiffness_tensor(r::Rheology,ϵij,D)
 end
 
 ## 
-function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
+function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true, R1_allowed=false, keep_2G=true)
 
   # Convert in case automatic differentiation supplies a Matrix to the function
   if σ̇ᵢⱼ isa Matrix
     sym_test = σ̇ᵢⱼ - σ̇ᵢⱼ'
     if all(.≈(0),sym_test)
+      @warn "σ̇ᵢⱼ matrix input is not symmetric"
       σ̇ᵢⱼ = SymmetricTensor{2,3}(σ̇ᵢⱼ)
     else
       println("printed :       ",[elem.value.value for elem in sym_test])
@@ -403,17 +418,17 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
 
   # stress at previous timestep
   σ = (1/3)*(tr(σᵢⱼ))
-  sᵢⱼ = σᵢⱼ - σ*𝕀
+  sᵢⱼ = dev(σᵢⱼ)
   τ = get_τ(sᵢⱼ)
 
   # stress derivatives
   σ̇ = (1/3)*(tr(σ̇ᵢⱼ))
   τ̇ = sᵢⱼ ⊡ σ̇ᵢⱼ / (2*τ)
 
-  #ṡᵢⱼ = σ̇ᵢⱼ - σ̇*𝕀
-  #τ̇ = get_τ(ṡᵢⱼ)
-
-  #@assert τ̇ == τ̇_2
+  if R1_allowed && (Ḋ == 0)
+    KI = compute_KI(r,σ,τ,D)
+    (KI <= 0) && return (1/(2*r.G)) * ( σ̇ᵢⱼ - (3r.ν/(1+r.ν))*σ̇*𝕀 )
+  end
   #damage constants and derivatives
   if r.D₀ == 0
     A1, B1 = 0.0, 0.0
@@ -424,7 +439,7 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
     A1, B1 = compute_A1B1(r,A,B)
     dc1dD = compute_dc1dD(r,D)
     dc2dD = compute_dc2dD(r,D)
-    dc3dD = compute_dc2dD(r,D)
+    dc3dD = compute_dc3dD(r,D)
     dA1dD = compute_dA1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
     dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   end
@@ -438,9 +453,9 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true)
   else
     t3 = zero(SymmetricTensor{2, 3})
   end
-  ϵ̇ᵢⱼ = 1/(2r.G) * (t1 + t2 + t3)
-
-  return convert(SymmetricTensor{2,3,eltype(ϵ̇ᵢⱼ)},ϵ̇ᵢⱼ)
+  ϵ̇ᵢⱼ = t1 + t2 + t3
+  !keep_2G && (ϵ̇ᵢⱼ = (1/(2r.G)) * ϵ̇ᵢⱼ)
+  return ϵ̇ᵢⱼ#convert(SymmetricTensor{2,3,eltype(ϵ̇ᵢⱼ)},ϵ̇ᵢⱼ)
 end
 
 function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
@@ -465,7 +480,6 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
   # stress derivatives
   σ̇ij = (σijnext-σij)/Δt
   σ̇ = (1/3)*(tr(σ̇ij))
-  ṡᵢⱼ = σ̇ij - σ̇*𝕀
   #τ̇_2 = get_τ(ṡᵢⱼ)
   τ̇ = sij ⊡ σ̇ij / (2*τ)
   #@show(τ̇,τ̇_i)
@@ -483,7 +497,7 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
     A1, B1 = compute_A1B1(r,A,B)
     dc1dD = compute_dc1dD(r,D)
     dc2dD = compute_dc2dD(r,D)
-    dc3dD = compute_dc2dD(r,D)
+    dc3dD = compute_dc3dD(r,D)
     dA1dD = compute_dA1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
     dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   end
@@ -505,6 +519,7 @@ end
 
 λ₁(A1,B1,σ,τ) =  1 + A1*B1*σ/(2*τ) + B1^2/2
 λ₂(r,A1,B1,σ,τ) = 3*r.ν/(1+r.ν) + A1*B1*σ/(2*τ) - A1^2/3 + B1^2/2
+λ₃(A1,B1) = (A1*B1)/3
 dλ₁dσ(A1,B1,τ) = A1*B1/(2*τ)
 dλ₁dτ(A1,B1,σ,τ) = -A1*B1*σ/(2*τ^2)
 dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ) = (dA1dD*B1 + A1*dB1dD)*σ/(2*τ) + B1*dB1dD
@@ -532,4 +547,5 @@ function dλ₁dt(r,D,σ,τ,Ḋ,σ̇,τ̇)
 end
 
 dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ) = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ) - (2/3)*A1*dA1dD
+dλ₃dD(A1,B1,dA1dD,dB1dD) = (A1*dB1dD + dA1dD*B1)/3
 

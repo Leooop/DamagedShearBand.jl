@@ -1,13 +1,13 @@
 function vermeer_simple_shear_update_du(u,p,t)
     # unpacking
-    r, mp, σ₃, ϵ̇₁₂, du_prev = @view(p[1:5])
+    r, mp, σ₃, ϵ̇₁₂, du_prev, vmax = @view(p[1:6])
     σ̇₁₁_prev, σ̇₁₂_prev, σ̇ₒₒₚ_prev, ϵ̇₂₂_prev, _ = du_prev
     σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
     # get stress tensor
     σᵢⱼ = SymmetricTensor{2,3}(SA[σ₁₁ σ₁₂ 0 ; σ₁₂ σ₃ 0 ; 0 0 σₒₒₚ])
 
     # correct flaws orientation according to stress rotation
-    if length(p) == 7
+    if length(p) == 8
         ψ_cor = compute_flaws_angle_wrt_σ1(σᵢⱼ,p)
         r = Rheology(r,(ψ=ψ_cor,)) 
     end
@@ -15,7 +15,7 @@ function vermeer_simple_shear_update_du(u,p,t)
     # compute damage growth rate
     KI = compute_KI(r,σᵢⱼ,D)
     #@show r.ψ KI
-    Ḋ = compute_subcrit_damage_rate(r,KI,D ; vmax=:l̇₀)
+    Ḋ = compute_subcrit_damage_rate(r,KI,D ; vmax)
 
     # solve for non linear derivatives
     nl_u = SA[σ̇₁₁_prev, σ̇₁₂_prev, σ̇ₒₒₚ_prev, ϵ̇₂₂_prev] # first guess is previous iter
@@ -49,7 +49,7 @@ function nl_solve(res_func,nl_u,u,p,σᵢⱼ,Ḋ)
         nl_u_scaled = nl_u_scaled + δnl_u
         #@debug "δu = $δu"
         #@debug "typeof(u) = $(typeof(u))"
-        if (norm(res) <= mp.solver.newton_abstol) && (abs(res[3]) > 1e-15) #test plain strain condition
+        if (norm(res) <= mp.solver.newton_abstol) && (abs(res[3]) > 1e-10) #test plain strain condition
             @show(norm(res),res[3])
         end
         (norm(res) <= mp.solver.newton_abstol) && (break) # @debug("Newton iter $i ending norm res = $(norm(res))") ;

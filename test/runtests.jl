@@ -209,6 +209,86 @@ end
     @test all(i -> i < abstol, abs.(ϵ_in .- ϵⁱᵢⱼ)) == true
 end
 
+@testset "comparison between two residual forms" begin
+    # input :
+    r = DSB.Rheology(
+      G = 28e9,
+      ν = 0.25,
+      μ = 0.6, # Friction coef
+      β = 0.1, # Correction factor
+      K₁c = 1.74e6, # Critical stress intensity factor (Pa.m^(1/2))
+      a = 0.1, # Initial flaw size (m)
+      ψ = 0.5*atand(1/0.6),# crack angle to the principal stress (radians)
+      D₀ = 0.55,# Initial flaw density
+      n = 5.5, # Stress corrosion index
+      l̇₀ = 7e-5, # Ref. crack growth rate (m/s)
+      H = 50e3, # Activation enthalpy (J/mol)
+      A = 5.71 # Preexponential factor (m/s)
+    )
+
+    σ₃ = -1e6
+    du = [-17.060700132915812, -4.572215062877375, -12.380368686287465, 1.530946116594802e-8, 8.045129698897287e-7]
+    u = [-1.8458631082604998e6, 878593.6772462169, -1.942972357187292e6, 0.00024964206656874537, 0.9899999999999999]
+    σ₁₁, σ₁₂, σₒₒₚ, ϵ₂₂, D = u
+    σ̇₁₁, σ̇₁₂, σ̇ₒₒₚ, ϵ̇₂₂, Ḋ = du
+    σᵢⱼ = SymmetricTensor{2,3}(SA[σ₁₁ σ₁₂ 0 ; σ₁₂ σ₃ 0 ; 0 0 σₒₒₚ])
+    Ḋ = du[5]
+    du_nl = SA[σ̇₁₁, σ̇₁₂, σ̇ₒₒₚ, ϵ̇₂₂*r.G]
+
+    σ̇ᵢⱼ = SymmetricTensor{2,3}([ σ̇₁₁    σ̇₁₂   0.0  ;
+                                 σ̇₁₂    0.0   0.0  ;
+                                 0.0    0.0   σ̇ₒₒₚ ])
+
+    𝕀 = SymmetricTensor{2,3}(DSB.δ) # Second order identity tensor
+
+    # stress at previous timestep
+    σ = (1/3)*(tr(σᵢⱼ))
+    sᵢⱼ = dev(σᵢⱼ)
+    τ = DSB.get_τ(sᵢⱼ)
+
+    # stress derivatives
+    σ̇ = (1/3)*(tr(σ̇ᵢⱼ))
+    τ̇ = sᵢⱼ ⊡ σ̇ᵢⱼ / (2*τ)
+
+    # damage constants
+    c1, c2, c3 = DSB.compute_c1c2c3(r,D)
+    A, B = DSB.compute_AB(r,c1,c2,c3)
+    A1, B1 = DSB.compute_A1B1(r,A,B)
+
+    dc1dD = DSB.compute_dc1dD(r,D)
+    dc2dD = DSB.compute_dc2dD(r,D)
+    dc3dD = DSB.compute_dc3dD(r,D)
+    dA1dD = DSB.compute_dA1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
+    dB1dD = DSB.compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
+
+    la1 = DSB.λ₁(A1,B1,σ,τ)
+    la2 = DSB.λ₂(r,A1,B1,σ,τ)
+    la3 = DSB.λ₃(A1,B1)
+    dla1dD  = DSB.dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)
+    dla2dD  = DSB.dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)
+    dla3dD  = DSB.dλ₃dD(A1,B1,dA1dD,dB1dD)
+    dla1dσ  = DSB.dλ₁dσ(A1,B1,τ)
+    dla1dτ  = DSB.dλ₁dτ(A1,B1,σ,τ)
+
+    # RES JAO
+    res1 = SA[ la1*σ̇₁₁ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[1,1] - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[1,1],
+              -2*r.G*ϵ̇₂₂ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*params.σ₃ - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[2,2],
+              la1*σ̇ₒₒₚ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[3,3] - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[3,3],
+              -2*r.G*params.ϵ̇₁₂ + la1*σ̇₁₂ + Ḋ*dla1dD*σᵢⱼ[1,2] + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[1,2] ] 
+
+    # RES initial
+    t1 = DSB.λ₁(A1,B1,σ,τ)*σ̇ᵢⱼ - ( DSB.λ₂(r,A1,B1,σ,τ)*σ̇ - (1/3)*A1*B1*τ̇ )*𝕀
+    t2 = ( DSB.dλ₁dσ(A1,B1,τ)*σ̇ + DSB.dλ₁dτ(A1,B1,σ,τ)*τ̇ )*sᵢⱼ
+    t3 = DSB.dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σᵢⱼ - ( DSB.dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
+    ϵ̇ᵢⱼ = t1 + t2 + t3
+
+    res2 = SA[ϵ̇ᵢⱼ[1,1],
+              -2*r.G*ϵ̇₂₂ + ϵ̇ᵢⱼ[2,2],
+              ϵ̇ᵢⱼ[3,3],
+              -2*r.G*params.ϵ̇₁₂ + ϵ̇ᵢⱼ[1,2]]
+
+    @test maximum(abs.(res1 .- res2)) <=1e-12
+end
 # @testset "residual function DiffEq form" begin
 #     # parameters initialization
 #     σ₃ = -1e6
