@@ -65,8 +65,9 @@ function residual_simple_shear(du,u,σᵢⱼ,Ḋ,p ; R1_allowed=false)
     τ = get_τ(sᵢⱼ)
 
     σ̇ = tr(σ̇ᵢⱼ)/3
-    τ̇ = sᵢⱼ ⊡ σ̇ᵢⱼ / (2*τ)
-
+    𝕀 = SymmetricTensor{2,3}(δ)
+    ṡᵢⱼ = σ̇ᵢⱼ - σ̇*𝕀
+    τ̇ = sᵢⱼ ⊡ ṡᵢⱼ / (2*τ)
     # if R1_allowed && (Ḋ == 0)
     #     KI = DSB.compute_KI(r,σ,τ,D)
     #     if KI <= 0
@@ -97,9 +98,13 @@ function residual_simple_shear(du,u,σᵢⱼ,Ḋ,p ; R1_allowed=false)
     dla1dσ  = dλ₁dσ(A1,B1,τ)
     dla1dτ  = dλ₁dτ(A1,B1,σ,τ)
     # build residual
-    res = SA[ la1*σ̇₁₁ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[1,1] - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[1,1],
-              -2*r.G*ϵ̇₂₂ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*params.σ₃ - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[2,2],
-              la1*σ̇ₒₒₚ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[3,3] - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[3,3],
+    # res = SA[ la1*σ̇₁₁ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[1,1] - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[1,1],
+    #           -2*r.G*ϵ̇₂₂ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*params.σ₃ - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[2,2],
+    #           la1*σ̇ₒₒₚ - la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[3,3] - dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[3,3],
+    #           -2*r.G*params.ϵ̇₁₂ + la1*σ̇₁₂ + Ḋ*dla1dD*σᵢⱼ[1,2] + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[1,2] ] 
+    res = SA[ la1*σ̇₁₁ + la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[1,1] + dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[1,1],
+              -2*r.G*ϵ̇₂₂ + la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*params.σ₃ + dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[2,2],
+              la1*σ̇ₒₒₚ + la2*σ̇ + la3*τ̇ + Ḋ * (dla1dD*σᵢⱼ[3,3] + dla2dD*σ + dla3dD*τ) + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[3,3],
               -2*r.G*params.ϵ̇₁₂ + la1*σ̇₁₂ + Ḋ*dla1dD*σᵢⱼ[1,2] + (dla1dσ*σ̇ + dla1dτ*τ̇)*sᵢⱼ[1,2] ] 
     return res
 end

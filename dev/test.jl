@@ -1,10 +1,11 @@
 @time (using DamagedShearBand ; const DSB = DamagedShearBand)
+using Plots
 #ENV["JULIA_DEBUG"] = DamagedShearBand
 
 
 # σ₃ = -1e6
 # θ = 60.0
-# r = DSB.Rheology(D₀=0.2)
+r = DSB.Rheology(D₀=0.2,ν=0.5)
 # Sc = get_damage_onset(r,σ₃,D)
 # σᵢⱼ = DSB.build_principal_stress_tensor(r,5,σ₃,Dc)
 
@@ -21,9 +22,13 @@
 # τ_vec./p_vec
 # A,B = DSB.compute_AB(r,Dc)
 # A/B
-# KI_vec = [DSB.compute_KI(r, σᵢⱼ, Dc) for σᵢⱼ in σᵢⱼ_Dc_vec]
+σ_vec = -1e6:-10e6:-10e8
+D_vec = r.D₀:0.01:0.999
+  KI_vec = [DSB.compute_KI(r,σ,-2* r.μ*σ,D) for σ in σ_vec, D in D_vec]
+  KI_pos = KI_vec.>=0
+  heatmap(string.(D_vec),string.(σ_vec./1e6),KI_pos,aspect_ratio=:equal,xlabel="D",ylabel="σ (MPa)")
 
-# KI_vec = [DSB.compute_KI(r, σ,τ, Dc) for (σ,τ) in zip(-p_vec,τ_vec)]
+KI_vec = [DSB.compute_KI(r, σ,τ, Dc) for (σ,τ) in zip(-p_vec,τ_vec)]
 # -A.*p_vec .+ B.*τ_vec
 
 # ##

@@ -1,18 +1,18 @@
 using Base: @kwdef
-
-@kwdef struct Rheology
-  G::Float64 = 30e9
-  ν::Float64 = 0.3
-  μ::Float64 = 0.6 # Friction coef
-  β::Float64 = 0.1 # Correction factor
-  K₁c::Float64 = 1.74e6 # Critical stress intensity factor (Pa.m^(1/2))
-  a::Float64 = 1e-3 # Initial flaw size (m)
-  ψ::Float64 = atand(0.6)# crack angle to the principal stress (radians)
-  D₀::Float64 = 0.1# Initial flaw density
-  n::Float64 = 34.0 # Stress corrosion index
-  l̇₀::Float64 = 0.24 # Ref. crack growth rate (m/s)
-  H::Float64 = 50e3 # Activation enthalpy (J/mol)
-  A::Float64 = 5.71 # Preexponential factor (m/s)
+const R = Real
+@kwdef struct Rheology{t1<:R,t2<:R,t3<:R,t4<:R,t5<:R,t6<:R,t7<:R,t8<:R,t9<:R,t10<:R,t11<:R,t12<:R}
+  G::t1 = 30e9
+  ν::t2 = 0.3
+  μ::t3 = 0.6 # Friction coef
+  β::t4 = 0.1 # Correction factor
+  K₁c::t5 = 1.74e6 # Critical stress intensity factor (Pa.m^(1/2))
+  a::t6 = 1e-3 # Initial flaw size (m)
+  ψ::t7 = atand(0.6)# crack angle to the principal stress (degree)
+  D₀::t8 = 0.1# Initial flaw density
+  n::t9 = 34.0 # Stress corrosion index
+  l̇₀::t10 = 0.24 # Ref. crack growth rate (m/s)
+  H::t11 = 50e3 # Activation enthalpy (J/mol)
+  A::t12 = 5.71 # Preexponential factor (m/s)
 end
 
 function Rheology(r::Rheology, kw::NamedTuple)

@@ -14,12 +14,15 @@ free_energy_convexity(r::Rheology,D) = 1/compute_Γ(r,compute_A1B1(r,D)...) > 0 
 function compute_c1(r,D)
   α = cosd(r.ψ)
   #(α < 0) && (α = -α) #### careful with that
-  @assert α >= 0
+  #@show r.ψ α
+  isnan(α) && @show(r.ψ)
+  @assert (α >= 0)
 
   if r.D₀>0
     isnan(D) && error("D is NaN")
     isnan(r.D₀) && error("r.D₀ is NaN")
     ((D/r.D₀) < 1) && println("D = $D & D₀ = $(r.D₀)")
+    #(D < r.D₀) && (D = r.D₀)
     @assert (D/r.D₀) >= 1
     return sqrt(1-α^2)/(π*α^(3/2)*((D/r.D₀)^(1/3) - 1 + r.β/α)^(3/2))
   elseif (r.D₀==0) & (D==0)
@@ -27,19 +30,22 @@ function compute_c1(r,D)
   end
 end
 # Perol&Bhat2016 : 1/α  or  Harsha's notes : 1/α^2 ???
-function compute_c2(d::Rheology,D)
-  α = cosd(d.ψ)
-  (d.D₀==0) && (return 0.0)
-  return (sqrt(1 - α^2)/α^2) * (d.D₀^(2/3)/(1 - D^(2/3))) ###
+function compute_c2(r::Rheology,D)
+  α = cosd(r.ψ)
+  (r.D₀==0) && (return 0.0)
+  #(D < r.D₀) && (D = r.D₀)
+  return (sqrt(1 - α^2)/α^2) * (r.D₀^(2/3)/(1 - D^(2/3))) ###
 end
 
-function compute_c3(d::Rheology,D)
-  α = cosd(d.ψ)
+function compute_c3(r::Rheology,D)
+  α = cosd(r.ψ)
   #(α < 0) && (α = -α) #### careful with that
   @assert α > 0
-  (d.D₀ == D) && (return 0.0)
-  @assert (D/d.D₀) >= 1
-  return (2sqrt(α)/π)*((D/d.D₀)^(1/3) - 1)^(1/2)
+  (r.D₀ == D) && (return 0.0)
+  #(D < r.D₀) && (D = r.D₀)
+  !((D/r.D₀) >= 1) && @show(D,r.D₀)
+  @assert (D/r.D₀) >= 1
+  return (2sqrt(α)/π)*((D/r.D₀)^(1/3) - 1)^(1/2)
 end
 
 function compute_c1c2c3(r,D)
@@ -123,7 +129,7 @@ function compute_dc3dD(r::Rheology,D)
   term2 = ((D/r.D₀)^(1/3) - 1)^(-1/2)
 
   # ensure term2 isn't Infinity
-  (term2 == Inf) && (term2 = 1e9)
+  (term2 == Inf) && (term2 = 1e15)
   return term1 * term2
 end
 
@@ -202,12 +208,8 @@ end
 function compute_KI(r::Rheology,σ,τ,D)
   c1, c2, c3 = compute_c1c2c3(r,D)
   A, B = compute_AB(r,c1,c2,c3)
-  # println("c1 : ",c1)
-  # println("c2 : ",c2)
-  # println("c3 : ",c3)
-  # println("σ : ",σ)
-  # println("τ : ",τ)
-  return (A*σ + B*τ) * sqrt(π*r.a)
+  a = r.a<=0 ? 1e-7 : r.a
+  return (A*σ + B*τ) * sqrt(π*a)
 end
 
 function compute_KI(r::Rheology,σij::SymmetricTensor,D)
@@ -240,6 +242,7 @@ function compute_subcrit_damage_rate(r::Rheology, KI, D ; vmax = :l̇₀)
   end
   dldt = min(r.l̇₀*(KI/r.K₁c)^(r.n),dlmax)  #Vr cracks growth rate
   #@debug dlmax
+  (dDdl * dldt < 0) && @show(dDdl,dldt)
   @assert dDdl * dldt >= 0
   return dDdl * dldt
 end
@@ -278,7 +281,7 @@ function compute_σij(r,A1,B1,Γ,ϵij)
   # TODO make a visco elastic version of this function
 
   if all(x->x==0,ϵij)
-      return Tensor{2,3}(ϵij)
+      return SymmetricTensor{2,3}(ϵij)
   end
 
   G = r.G
@@ -407,7 +410,7 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true, R1_
   if σ̇ᵢⱼ isa Matrix
     sym_test = σ̇ᵢⱼ - σ̇ᵢⱼ'
     if all(.≈(0),sym_test)
-      @warn "σ̇ᵢⱼ matrix input is not symmetric"
+      @warn "σ̇ᵢⱼ matrix input is approximately symmetric"
       σ̇ᵢⱼ = SymmetricTensor{2,3}(σ̇ᵢⱼ)
     else
       println("printed :       ",[elem.value.value for elem in sym_test])
@@ -423,7 +426,8 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true, R1_
 
   # stress derivatives
   σ̇ = (1/3)*(tr(σ̇ᵢⱼ))
-  τ̇ = sᵢⱼ ⊡ σ̇ᵢⱼ / (2*τ)
+  ṡᵢⱼ = σ̇ᵢⱼ - σ̇*𝕀
+  τ̇ = sᵢⱼ ⊡ ṡᵢⱼ / (2*τ)
 
   if R1_allowed && (Ḋ == 0)
     KI = compute_KI(r,σ,τ,D)
@@ -446,10 +450,10 @@ function compute_ϵ̇ij_2(r,D,Ḋ,σᵢⱼ,σ̇ᵢⱼ; damaged_allowed=true, R1_
 
   
   
-  t1 = λ₁(A1,B1,σ,τ)*σ̇ᵢⱼ - ( λ₂(r,A1,B1,σ,τ)*σ̇ - (1/3)*A1*B1*τ̇ )*𝕀
+  t1 = λ₁(A1,B1,σ,τ)*σ̇ᵢⱼ + ( λ₂(r,A1,B1,σ,τ)*σ̇ + (1/3)*A1*B1*τ̇ )*𝕀
   t2 = ( dλ₁dσ(A1,B1,τ)*σ̇ + dλ₁dτ(A1,B1,σ,τ)*τ̇ )*sᵢⱼ
   if damaged_allowed
-    t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σᵢⱼ - ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
+    t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σᵢⱼ + ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ + (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
   else
     t3 = zero(SymmetricTensor{2, 3})
   end
@@ -480,8 +484,8 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
   # stress derivatives
   σ̇ij = (σijnext-σij)/Δt
   σ̇ = (1/3)*(tr(σ̇ij))
-  #τ̇_2 = get_τ(ṡᵢⱼ)
-  τ̇ = sij ⊡ σ̇ij / (2*τ)
+  ṡij = σ̇ij - σ̇*𝕀
+  τ̇ = sij ⊡ ṡij / (2τ)
   #@show(τ̇,τ̇_i)
 
   # initialize damage rate
@@ -502,12 +506,12 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
     dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   end
 
-  t1 = λ₁(A1,B1,σ,τ)*σ̇ij - ( λ₂(r,A1,B1,σ,τ)*σ̇ - (1/3)*A1*B1*τ̇ )*𝕀
+  t1 = λ₁(A1,B1,σ,τ)*σ̇ij + ( λ₂(r,A1,B1,σ,τ)*σ̇ + (1/3)*A1*B1*τ̇ )*𝕀
   t2 = ( dλ₁dσ(A1,B1,τ)*σ̇ + dλ₁dτ(A1,B1,σ,τ)*τ̇ )*sij
   if damaged_allowed
     KI = compute_KI(r,(σijnext+σij)/2,D) # compute KI at intermediate stress : TO TEST.
     Ḋ = compute_subcrit_damage_rate(r,KI,D)
-    t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σij - ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ - (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
+    t3 = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σij + ( dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ*σ + (1/3)*Ḋ*(dA1dD*B1 + A1*dB1dD)*τ )*𝕀
   else
     t3 = zero(Tensor{2, 3})
   end
@@ -518,7 +522,7 @@ function compute_ϵ̇ij(r,D,σij,σijnext,Δt ; damaged_allowed=true)
 end
 
 λ₁(A1,B1,σ,τ) =  1 + A1*B1*σ/(2*τ) + B1^2/2
-λ₂(r,A1,B1,σ,τ) = 3*r.ν/(1+r.ν) + A1*B1*σ/(2*τ) - A1^2/3 + B1^2/2
+λ₂(r,A1,B1,σ,τ) = -(3*r.ν/(1+r.ν) + A1*B1*σ/(2*τ) - A1^2/3 + B1^2/2)
 λ₃(A1,B1) = (A1*B1)/3
 dλ₁dσ(A1,B1,τ) = A1*B1/(2*τ)
 dλ₁dτ(A1,B1,σ,τ) = -A1*B1*σ/(2*τ^2)
@@ -529,7 +533,7 @@ function dλ₁dD(r,D,σ,τ)
   A1, B1 = compute_A1B1(r,A,B)
   dc1dD = compute_dc1dD(r,D)
   dc2dD = compute_dc2dD(r,D)
-  dc3dD = compute_dc2dD(r,D)
+  dc3dD = compute_dc3dD(r,D)
   dA1dD = compute_dA1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   return (dA1dD*B1 + A1*dB1dD)*σ/(2*τ) + B1*dB1dD
@@ -540,12 +544,12 @@ function dλ₁dt(r,D,σ,τ,Ḋ,σ̇,τ̇)
   A1, B1 = compute_A1B1(r,A,B)
   dc1dD = compute_dc1dD(r,D)
   dc2dD = compute_dc2dD(r,D)
-  dc3dD = compute_dc2dD(r,D)
+  dc3dD = compute_dc3dD(r,D)
   dA1dD = compute_dA1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   dB1dD = compute_dB1dD(r,dc1dD,dc2dD,dc3dD,c2,c3)
   return dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ)*Ḋ + dλ₁dσ(A1,B1,τ)*σ̇ + dλ₁dτ(A1,B1,σ,τ)*τ̇
 end
 
-dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ) = dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ) - (2/3)*A1*dA1dD
+dλ₂dD(A1,B1,dA1dD,dB1dD,σ,τ) = -dλ₁dD(A1,B1,dA1dD,dB1dD,σ,τ) + (2/3)*A1*dA1dD
 dλ₃dD(A1,B1,dA1dD,dB1dD) = (A1*dB1dD + dA1dD*B1)/3
 
